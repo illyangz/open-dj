@@ -142,11 +142,41 @@ fn atomic_place(source: &Path, dest: &Path) -> Result<()> {
         f.sync_all()?;
     }
 
-    let result = fs::rename(&tmp_path, dest).map_err(FileOpsError::from);
+    let result = rename_replacing(&tmp_path, dest).map_err(FileOpsError::from);
     if result.is_err() {
         let _ = fs::remove_file(&tmp_path);
     }
     result
+}
+
+/// `fs::rename` onto an existing destination, retrying briefly on Windows
+/// if it comes back `PermissionDenied`. Windows Defender (and other
+/// real-time AV/indexer scanning) can hold a transient exclusive lock on a
+/// just-written file, causing `ERROR_ACCESS_DENIED` on rename/replace that
+/// has nothing to do with actual permissions — cargo, rustup, and VS Code
+/// all work around the same OS quirk the same way. On Unix this is a
+/// single plain rename; a real permissions error there fails immediately
+/// on first try, same as before.
+fn rename_replacing(from: &Path, to: &Path) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        let mut last_err = None;
+        for attempt in 0..10u32 {
+            match fs::rename(from, to) {
+                Ok(()) => return Ok(()),
+                Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+                    last_err = Some(e);
+                    std::thread::sleep(std::time::Duration::from_millis(20 * (attempt as u64 + 1)));
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last_err.expect("loop always sets last_err before exhausting attempts"))
+    }
+    #[cfg(not(windows))]
+    {
+        fs::rename(from, to)
+    }
 }
 
 #[cfg(test)]
