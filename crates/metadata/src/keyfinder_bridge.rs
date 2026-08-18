@@ -28,7 +28,11 @@ fn find_bridge_dylib() -> Option<PathBuf> {
     let mut candidates = vec![
         exe_dir.join(BRIDGE_FILENAME),
         exe_dir.parent()?.join("Resources").join(BRIDGE_FILENAME),
-        exe_dir.parent()?.parent()?.join("Resources").join(BRIDGE_FILENAME),
+        exe_dir
+            .parent()?
+            .parent()?
+            .join("Resources")
+            .join(BRIDGE_FILENAME),
     ];
     // Dev builds: `cargo run`/`cargo build` put the desktop binary and this
     // dylib in the same target/{debug,release} dir already covered above,
@@ -65,30 +69,30 @@ fn detect_key_code(samples: &[f32], channels: u32, sample_rate: u32) -> Option<i
 pub fn detect_key_camelot(samples: &[f32], channels: u32, sample_rate: u32) -> Option<String> {
     let code = detect_key_code(samples, channels, sample_rate)?;
     let camelot = match code {
-        0 => "4B",  // A major
-        1 => "1A",  // A minor
-        2 => "11B", // Bb major
-        3 => "8A",  // Bb minor
-        4 => "6B",  // B major
-        5 => "3A",  // B minor
-        6 => "1B",  // C major
-        7 => "10A", // C minor
-        8 => "8B",  // Db major
-        9 => "5A",  // Db minor
-        10 => "3B", // D major
-        11 => "12A", // D minor
-        12 => "10B", // Eb major
-        13 => "7A", // Eb minor
-        14 => "5B", // E major
-        15 => "2A", // E minor
-        16 => "12B", // F major
-        17 => "9A", // F minor
-        18 => "7B", // Gb major
-        19 => "4A", // Gb minor
-        20 => "2B", // G major
-        21 => "11A", // G minor
-        22 => "9B", // Ab major
-        23 => "6A", // Ab minor
+        0 => "4B",        // A major
+        1 => "1A",        // A minor
+        2 => "11B",       // Bb major
+        3 => "8A",        // Bb minor
+        4 => "6B",        // B major
+        5 => "3A",        // B minor
+        6 => "1B",        // C major
+        7 => "10A",       // C minor
+        8 => "8B",        // Db major
+        9 => "5A",        // Db minor
+        10 => "3B",       // D major
+        11 => "12A",      // D minor
+        12 => "10B",      // Eb major
+        13 => "7A",       // Eb minor
+        14 => "5B",       // E major
+        15 => "2A",       // E minor
+        16 => "12B",      // F major
+        17 => "9A",       // F minor
+        18 => "7B",       // Gb major
+        19 => "4A",       // Gb minor
+        20 => "2B",       // G major
+        21 => "11A",      // G minor
+        22 => "9B",       // Ab major
+        23 => "6A",       // Ab minor
         _ => return None, // 24 = silence, or a bridge-reported error (-1)
     };
     Some(camelot.to_string())

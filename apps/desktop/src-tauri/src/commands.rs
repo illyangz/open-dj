@@ -61,10 +61,7 @@ pub async fn ingest_inputs(
                 }
                 _ => {
                     // Single track or expansion failed — normal flow
-                    state
-                        .store
-                        .insert_input(input)
-                        .map_err(|e| e.to_string())?;
+                    state.store.insert_input(input).map_err(|e| e.to_string())?;
                     let job = state
                         .store
                         .create_job(input.id, input.provider_id.as_deref())
@@ -75,10 +72,7 @@ pub async fn ingest_inputs(
             }
         } else {
             // Local path, query, or non-ytdlp URL — normal flow
-            state
-                .store
-                .insert_input(input)
-                .map_err(|e| e.to_string())?;
+            state.store.insert_input(input).map_err(|e| e.to_string())?;
             let provider_id = input.provider_id.clone().or({
                 if input.kind == InputKind::LocalPath {
                     Some("local_file".to_string())
@@ -238,9 +232,8 @@ pub async fn generate_waveform(
     let cache_path = cache_dir.join(format!("{:x}.png", digest));
 
     if !cache_path.exists() {
-        let ffmpeg = opendj_providers::yt_dlp_bin::find_ffmpeg().ok_or(
-            "ffmpeg not found. Install it with: brew install ffmpeg".to_string(),
-        )?;
+        let ffmpeg = opendj_providers::yt_dlp_bin::find_ffmpeg()
+            .ok_or("ffmpeg not found. Install it with: brew install ffmpeg".to_string())?;
 
         let _permit = state
             .analysis_semaphore
@@ -270,7 +263,9 @@ pub async fn generate_waveform(
         }
     }
 
-    let bytes = tokio::fs::read(&cache_path).await.map_err(|e| e.to_string())?;
+    let bytes = tokio::fs::read(&cache_path)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(format!(
         "data:image/png;base64,{}",
         base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
@@ -487,8 +482,8 @@ pub async fn update_settings(
     let cookies_browser = (!settings.youtube_cookies_browser.is_empty())
         .then(|| settings.youtube_cookies_browser.clone());
     providers.set_cookies_browser(cookies_browser);
-    let cookies_file = (!settings.youtube_cookies_file.is_empty())
-        .then(|| settings.youtube_cookies_file.clone());
+    let cookies_file =
+        (!settings.youtube_cookies_file.is_empty()).then(|| settings.youtube_cookies_file.clone());
     providers.set_cookies_file(cookies_file);
     Ok(())
 }
@@ -655,9 +650,6 @@ pub async fn fetch_soundcloud_likes(username: String) -> CmdResult<Vec<ScTrack>>
     #[derive(Deserialize)]
     struct ScUser {
         id: u64,
-        full_name: Option<String>,
-        username: String,
-        followers_count: Option<u64>,
     }
 
     let user: ScUser = client
@@ -672,7 +664,7 @@ pub async fn fetch_soundcloud_likes(username: String) -> CmdResult<Vec<ScTrack>>
         .map_err(|e| e.to_string())?;
 
     if user.id == 0 {
-        return Err(format!("User @{} not found", username).into());
+        return Err(format!("User @{} not found", username));
     }
 
     // Step 3: Fetch all likes (paginated)
@@ -747,8 +739,7 @@ pub async fn fetch_soundcloud_likes(username: String) -> CmdResult<Vec<ScTrack>>
             .await
             .map_err(|e| e.to_string())?;
 
-        let data: LikesResp =
-            serde_json::from_str(&resp_text).map_err(|e| e.to_string())?;
+        let data: LikesResp = serde_json::from_str(&resp_text).map_err(|e| e.to_string())?;
 
         for item in data.collection {
             if let Some(t) = item.track {
@@ -759,9 +750,7 @@ pub async fn fetch_soundcloud_likes(username: String) -> CmdResult<Vec<ScTrack>>
                     .or_else(|| t.user.and_then(|u| u.username))
                     .unwrap_or_else(|| "Unknown".to_string());
 
-                let artwork = t
-                    .artwork_url
-                    .map(|a| a.replace("-large", "-t300x300"));
+                let artwork = t.artwork_url.map(|a| a.replace("-large", "-t300x300"));
 
                 let transcode_url = t.media.and_then(|m| m.transcodings).and_then(|tc| {
                     let tc: Vec<_> = tc;

@@ -63,11 +63,7 @@ fn find_in_bundle(name: &str) -> Option<PathBuf> {
         exe_dir.join(name),
         exe_dir.join(format!("{name}.exe")),
         exe_dir.parent()?.join("Resources").join(name),
-        exe_dir
-            .parent()?
-            .parent()?
-            .join("Resources")
-            .join(name),
+        exe_dir.parent()?.parent()?.join("Resources").join(name),
     ];
 
     for path in &candidates {
@@ -98,9 +94,9 @@ fn find_in_bundle(name: &str) -> Option<PathBuf> {
 /// comes up empty for the app.
 fn find_in_well_known_dirs(name: &str) -> Option<PathBuf> {
     let dirs = [
-        "/opt/homebrew/bin",  // Homebrew, Apple Silicon
-        "/usr/local/bin",     // Homebrew, Intel
-        "/opt/local/bin",     // MacPorts
+        "/opt/homebrew/bin", // Homebrew, Apple Silicon
+        "/usr/local/bin",    // Homebrew, Intel
+        "/opt/local/bin",    // MacPorts
     ];
     dirs.iter()
         .map(|dir| PathBuf::from(dir).join(name))

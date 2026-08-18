@@ -1,5 +1,5 @@
-use crate::{Capabilities, PolicyStatus, ProviderAdapter, ProviderError, Result, TrackCandidate};
 use crate::yt_dlp_bin;
+use crate::{Capabilities, PolicyStatus, ProviderAdapter, ProviderError, Result, TrackCandidate};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -103,10 +103,9 @@ impl YtdlpAdapter {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ProviderError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("yt-dlp failed: {stderr}"),
-            )));
+            return Err(ProviderError::Io(std::io::Error::other(format!(
+                "yt-dlp failed: {stderr}"
+            ))));
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -183,14 +182,9 @@ impl YtdlpAdapter {
     }
 
     /// Resolve a SoundCloud track URL to metadata.
-    async fn resolve_soundcloud(
-        &self,
-        url: &str,
-        client_id: &str,
-    ) -> Result<Vec<TrackCandidate>> {
-        let api_url = format!(
-            "https://api-v2.soundcloud.com/resolve?url={url}&client_id={client_id}"
-        );
+    async fn resolve_soundcloud(&self, url: &str, client_id: &str) -> Result<Vec<TrackCandidate>> {
+        let api_url =
+            format!("https://api-v2.soundcloud.com/resolve?url={url}&client_id={client_id}");
 
         let resp = self
             .http_client
@@ -239,26 +233,21 @@ impl YtdlpAdapter {
             .and_then(|u| u.username)
             .unwrap_or_else(|| "Unknown".to_string());
         let duration_ms = track.duration;
-        let source_url = track
-            .permalink_url
-            .unwrap_or_else(|| url.to_string());
+        let source_url = track.permalink_url.unwrap_or_else(|| url.to_string());
 
         // Find progressive (direct MP3) transcoding URL
-        let transcode_url = track
-            .media
-            .and_then(|m| m.transcodings)
-            .and_then(|tc| {
-                let tc: Vec<_> = tc;
-                let progressive = tc.iter().find(|x| {
-                    x.format
-                        .as_ref()
-                        .map(|f| f.protocol.as_deref() == Some("progressive"))
-                        .unwrap_or(false)
-                        && !x.snipped.unwrap_or(false)
-                });
-                let fallback = tc.iter().find(|x| !x.snipped.unwrap_or(false));
-                progressive.or(fallback).and_then(|x| x.url.clone())
+        let transcode_url = track.media.and_then(|m| m.transcodings).and_then(|tc| {
+            let tc: Vec<_> = tc;
+            let progressive = tc.iter().find(|x| {
+                x.format
+                    .as_ref()
+                    .map(|f| f.protocol.as_deref() == Some("progressive"))
+                    .unwrap_or(false)
+                    && !x.snipped.unwrap_or(false)
             });
+            let fallback = tc.iter().find(|x| !x.snipped.unwrap_or(false));
+            progressive.or(fallback).and_then(|x| x.url.clone())
+        });
 
         Ok(vec![TrackCandidate {
             id: track.id.to_string(),
@@ -282,7 +271,9 @@ impl YtdlpAdapter {
         let client_id = self.detect_sc_client_id().await?;
 
         // Re-resolve to get fresh transcoding URLs
-        let candidates = self.resolve_soundcloud(&candidate.source_url, &client_id).await?;
+        let candidates = self
+            .resolve_soundcloud(&candidate.source_url, &client_id)
+            .await?;
         let fresh = candidates.first().ok_or(ProviderError::NoMatch)?;
 
         // Get the actual stream URL from the API
@@ -355,12 +346,21 @@ impl YtdlpAdapter {
         let stream: StreamUrl = stream_resp.json().await?;
 
         // Download the MP3 stream
-        let resp = self.http_client.get(&stream.url).send().await?.error_for_status()?;
+        let resp = self
+            .http_client
+            .get(&stream.url)
+            .send()
+            .await?
+            .error_for_status()?;
         let bytes = resp.bytes().await?;
 
         tokio::fs::create_dir_all(dest_dir).await?;
 
-        let safe_name = format!("{} - {}", fresh.artist.as_deref().unwrap_or("Unknown"), fresh.title);
+        let safe_name = format!(
+            "{} - {}",
+            fresh.artist.as_deref().unwrap_or("Unknown"),
+            fresh.title
+        );
         let file_name = sanitize_filename(&safe_name);
         let dest_path = dest_dir.join(format!("{file_name}.mp3"));
         tokio::fs::write(&dest_path, &bytes).await?;
@@ -388,14 +388,12 @@ impl YtdlpAdapter {
         }
 
         // Try yt-dlp directly first (covers platforms it can extract without a search, e.g. some Apple Music/Deezer pages).
-        if let Ok(json) = self.run_ytdlp_json(&[
-            "--dump-json",
-            "--no-download",
-            "--no-playlist",
-            raw,
-        ]).await {
+        if let Ok(json) = self
+            .run_ytdlp_json(&["--dump-json", "--no-download", "--no-playlist", raw])
+            .await
+        {
             if let Ok(info) = serde_json::from_str::<YtdlpInfo>(&json) {
-                return Ok(vec![info.to_candidate(raw, true)]);
+                return Ok(vec![info.into_candidate(raw, true)]);
             }
         }
 
@@ -419,13 +417,9 @@ impl YtdlpAdapter {
         known: Option<SourceTrackMeta>,
     ) -> Result<Vec<TrackCandidate>> {
         let search_url = format!("ytsearch1:{query}");
-        let json = self.run_ytdlp_json(&[
-            "--dump-json",
-            "--no-download",
-            "--no-playlist",
-            &search_url,
-        ])
-        .await?;
+        let json = self
+            .run_ytdlp_json(&["--dump-json", "--no-download", "--no-playlist", &search_url])
+            .await?;
 
         let info: YtdlpInfo = serde_json::from_str(&json).map_err(|e| {
             ProviderError::Io(std::io::Error::new(
@@ -434,7 +428,7 @@ impl YtdlpAdapter {
             ))
         })?;
 
-        let mut candidate = info.to_candidate(raw, true);
+        let mut candidate = info.into_candidate(raw, true);
         if let Some(meta) = known {
             candidate.title = meta.title;
             candidate.artist = meta.artist.map(|a| format!("{a} (via YouTube)"));
@@ -480,7 +474,9 @@ impl YtdlpAdapter {
         const START: &str = "<script id=\"__NEXT_DATA__\" type=\"application/json\">";
         let start = html.find(START).ok_or(ProviderError::NoMatch)?;
         let body_start = start + START.len();
-        let end = html[body_start..].find("</script>").ok_or(ProviderError::NoMatch)?;
+        let end = html[body_start..]
+            .find("</script>")
+            .ok_or(ProviderError::NoMatch)?;
         let json_str = &html[body_start..body_start + end];
 
         let data: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
@@ -498,7 +494,11 @@ impl YtdlpAdapter {
         let artist = entity["artists"][0]["name"].as_str().map(|s| s.to_string());
         let duration_ms = entity["duration"].as_u64();
 
-        Ok(SourceTrackMeta { title, artist, duration_ms })
+        Ok(SourceTrackMeta {
+            title,
+            artist,
+            duration_ms,
+        })
     }
 
     fn extract_search_query(url: &str) -> String {
@@ -614,7 +614,7 @@ struct YtdlpInfo {
 }
 
 impl YtdlpInfo {
-    fn to_candidate(self, source_url: &str, is_drm_fallback: bool) -> TrackCandidate {
+    fn into_candidate(self, source_url: &str, is_drm_fallback: bool) -> TrackCandidate {
         let title = self.title.unwrap_or_else(|| "Unknown Title".to_string());
         let artist = self.artist.or(self.uploader).map(|a| {
             if is_drm_fallback {
@@ -695,13 +695,9 @@ impl ProviderAdapter for YtdlpAdapter {
         }
 
         // Everything else: yt-dlp
-        let json = self.run_ytdlp_json(&[
-            "--dump-json",
-            "--no-download",
-            "--no-playlist",
-            raw,
-        ])
-        .await?;
+        let json = self
+            .run_ytdlp_json(&["--dump-json", "--no-download", "--no-playlist", raw])
+            .await?;
 
         let info: YtdlpInfo = serde_json::from_str(&json).map_err(|e| {
             ProviderError::Io(std::io::Error::new(
@@ -710,7 +706,7 @@ impl ProviderAdapter for YtdlpAdapter {
             ))
         })?;
 
-        Ok(vec![info.to_candidate(raw, false)])
+        Ok(vec![info.into_candidate(raw, false)])
     }
 
     async fn fetch(&self, candidate: &TrackCandidate, dest_dir: &Path) -> Result<PathBuf> {
@@ -725,9 +721,9 @@ impl ProviderAdapter for YtdlpAdapter {
         let output_template = dest_dir.join("%(title)s - %(artist)s.%(ext)s");
         let ytdlp = Self::ytdlp_path()?;
 
-        let ffmpeg_path = yt_dlp_bin::find_ffmpeg().ok_or(
-            ProviderError::NotConfigured("ffmpeg not found. Install it with: brew install ffmpeg"),
-        )?;
+        let ffmpeg_path = yt_dlp_bin::find_ffmpeg().ok_or(ProviderError::NotConfigured(
+            "ffmpeg not found. Install it with: brew install ffmpeg",
+        ))?;
 
         // YouTube's default/android_vr clients will list formats fine but then
         // 403 on the actual byte fetch unless a PO Token is supplied (we
@@ -756,30 +752,47 @@ impl ProviderAdapter for YtdlpAdapter {
             // need format 18 (a combined, lower-bitrate mp4) specifically
             // because that's the one format YouTube leaves fetchable for
             // them even when it warns about a missing PO token.
-            let format = if *client == "web_embedded" { "bestaudio[ext=m4a]/bestaudio/best" } else { "18" };
+            let format = if *client == "web_embedded" {
+                "bestaudio[ext=m4a]/bestaudio/best"
+            } else {
+                "18"
+            };
             let ffmpeg_str = ffmpeg_path.to_string_lossy();
             let output_str = output_template.to_string_lossy();
             let client_arg = format!("youtube:player_client={client}");
             let base_args = [
-                "-f", format,
+                "-f",
+                format,
                 "-x",
-                "--audio-format", "mp3",
-                "--audio-quality", "320K",
-                "--ffmpeg-location", &ffmpeg_str,
-                "--output", &output_str,
+                "--audio-format",
+                "mp3",
+                "--audio-quality",
+                "320K",
+                "--ffmpeg-location",
+                &ffmpeg_str,
+                "--output",
+                &output_str,
                 "--no-playlist",
                 "--no-overwrites",
-                "--parse-metadata", "%(title)s:%(meta_title)s",
-                "--parse-metadata", "%(uploader)s:%(meta_artist)s",
-                "--parse-metadata", "%(album)s:%(meta_album)s",
-                "--extractor-args", &client_arg,
+                "--parse-metadata",
+                "%(title)s:%(meta_title)s",
+                "--parse-metadata",
+                "%(uploader)s:%(meta_artist)s",
+                "--parse-metadata",
+                "%(album)s:%(meta_album)s",
+                "--extractor-args",
+                &client_arg,
                 &candidate.source_url,
             ];
 
             // Try with cookies first (if configured); a stale/rotated
             // cookie is worse than none, so retry the same client with no
             // cookies before giving up on it — see `is_stale_cookie_error`.
-            let attempts: &[bool] = if cookie_arg.is_some() { &[true, false] } else { &[false] };
+            let attempts: &[bool] = if cookie_arg.is_some() {
+                &[true, false]
+            } else {
+                &[false]
+            };
             let mut output = None;
             for &use_cookies in attempts {
                 let cookie_args: Vec<&str> = if use_cookies {
@@ -790,7 +803,11 @@ impl ProviderAdapter for YtdlpAdapter {
                 } else {
                     vec![]
                 };
-                let args: Vec<&str> = cookie_args.iter().chain(base_args.iter()).copied().collect();
+                let args: Vec<&str> = cookie_args
+                    .iter()
+                    .chain(base_args.iter())
+                    .copied()
+                    .collect();
 
                 let attempt = tokio::process::Command::new(&ytdlp)
                     .args(&args)
@@ -819,10 +836,11 @@ impl ProviderAdapter for YtdlpAdapter {
             let retryable = stderr.contains("403") || stderr.contains("Requested format");
             attempt_errors.push(format!("[{client}] {stderr}"));
             if !retryable || i == clients.len() - 1 {
-                return Err(ProviderError::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("yt-dlp download failed after trying {}: {}", clients.join(", "), attempt_errors.join("\n---\n")),
-                )));
+                return Err(ProviderError::Io(std::io::Error::other(format!(
+                    "yt-dlp download failed after trying {}: {}",
+                    clients.join(", "),
+                    attempt_errors.join("\n---\n")
+                ))));
             }
         }
 
@@ -832,13 +850,14 @@ impl ProviderAdapter for YtdlpAdapter {
 
     async fn search(&self, query: &str) -> Result<Vec<TrackCandidate>> {
         let search_query = format!("ytsearch10:{query}");
-        let json = self.run_ytdlp_json(&[
-            "--dump-json",
-            "--no-download",
-            "--flat-playlist",
-            &search_query,
-        ])
-        .await?;
+        let json = self
+            .run_ytdlp_json(&[
+                "--dump-json",
+                "--no-download",
+                "--flat-playlist",
+                &search_query,
+            ])
+            .await?;
 
         let mut results = Vec::new();
         for line in json.lines() {
@@ -846,7 +865,7 @@ impl ProviderAdapter for YtdlpAdapter {
                 continue;
             }
             if let Ok(info) = serde_json::from_str::<YtdlpInfo>(line) {
-                results.push(info.to_candidate("", false));
+                results.push(info.into_candidate("", false));
             }
         }
 
@@ -871,7 +890,7 @@ fn find_latest_mp3(dir: &Path) -> Result<PathBuf> {
         })
         .collect();
 
-    entries.sort_by(|a, b| b.1.cmp(&a.1));
+    entries.sort_by_key(|e| std::cmp::Reverse(e.1));
 
     entries
         .into_iter()
@@ -909,23 +928,39 @@ mod tests {
 
     #[test]
     fn detects_drm_platforms() {
-        assert!(YtdlpAdapter::is_drm_platform("https://open.spotify.com/track/abc"));
-        assert!(YtdlpAdapter::is_drm_platform("https://music.apple.com/us/album/xyz"));
-        assert!(!YtdlpAdapter::is_drm_platform("https://youtube.com/watch?v=abc"));
-        assert!(!YtdlpAdapter::is_drm_platform("https://soundcloud.com/artist/track"));
+        assert!(YtdlpAdapter::is_drm_platform(
+            "https://open.spotify.com/track/abc"
+        ));
+        assert!(YtdlpAdapter::is_drm_platform(
+            "https://music.apple.com/us/album/xyz"
+        ));
+        assert!(!YtdlpAdapter::is_drm_platform(
+            "https://youtube.com/watch?v=abc"
+        ));
+        assert!(!YtdlpAdapter::is_drm_platform(
+            "https://soundcloud.com/artist/track"
+        ));
     }
 
     #[test]
     fn detects_soundcloud_urls() {
-        assert!(YtdlpAdapter::is_soundcloud_url("https://soundcloud.com/artist/track"));
-        assert!(!YtdlpAdapter::is_soundcloud_url("https://youtube.com/watch?v=abc"));
+        assert!(YtdlpAdapter::is_soundcloud_url(
+            "https://soundcloud.com/artist/track"
+        ));
+        assert!(!YtdlpAdapter::is_soundcloud_url(
+            "https://youtube.com/watch?v=abc"
+        ));
     }
 
     #[test]
     fn detects_spotify_urls() {
-        assert!(YtdlpAdapter::is_spotify_url("https://open.spotify.com/track/abc"));
+        assert!(YtdlpAdapter::is_spotify_url(
+            "https://open.spotify.com/track/abc"
+        ));
         assert!(YtdlpAdapter::is_spotify_url("spotify:track:abc"));
-        assert!(!YtdlpAdapter::is_spotify_url("https://youtube.com/watch?v=abc"));
+        assert!(!YtdlpAdapter::is_spotify_url(
+            "https://youtube.com/watch?v=abc"
+        ));
     }
 
     #[test]
@@ -948,7 +983,10 @@ mod tests {
             YtdlpAdapter::extract_spotify_track_id("spotify:track:3n3Ppam7vgaVa1iaRUc9Lp"),
             Some("3n3Ppam7vgaVa1iaRUc9Lp".to_string())
         );
-        assert_eq!(YtdlpAdapter::extract_spotify_track_id("https://youtube.com/watch?v=abc"), None);
+        assert_eq!(
+            YtdlpAdapter::extract_spotify_track_id("https://youtube.com/watch?v=abc"),
+            None
+        );
     }
 
     #[test]

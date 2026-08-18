@@ -80,7 +80,12 @@ fn decode(path: &Path) -> Result<DecodedAudio> {
     }
 
     let probed = symphonia::default::get_probe()
-        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
         .map_err(|e| MetadataError::Analysis(format!("unsupported format: {e}")))?;
     let mut format = probed.format;
 

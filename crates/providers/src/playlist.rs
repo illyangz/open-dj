@@ -74,8 +74,8 @@ pub async fn expand_playlist(url: &str) -> std::result::Result<Vec<PlaylistEntry
             ie_key: Option<String>,
         }
 
-        let flat: FlatEntry = serde_json::from_str(line)
-            .map_err(|e| PlaylistError::ParseError(e.to_string()))?;
+        let flat: FlatEntry =
+            serde_json::from_str(line).map_err(|e| PlaylistError::ParseError(e.to_string()))?;
 
         // The entry URL can be in `url`, `webpage_url`, or we construct it from `id`
         let entry_url = flat
