@@ -117,10 +117,15 @@ pub fn restore_from_backup(backup_path: &Path, original_path: &Path) -> Result<S
 }
 
 /// Copies `source` to a temp file beside `dest`, fsyncs it, then performs a
-/// single atomic replace of `dest`. On any error prior to the final swap,
-/// `dest` is untouched; on Unix the swap itself is a same-filesystem
-/// rename (atomic); on Windows it uses `ReplaceFileW`, which performs the
-/// swap as a single filesystem transaction.
+/// single atomic replace of `dest` via `fs::rename`. On any error prior to
+/// the final swap, `dest` is untouched. On Unix this is a same-filesystem
+/// rename (atomic). On Windows, `std::fs::rename` already does the
+/// equivalent — it calls `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`,
+/// which performs the swap as a single filesystem transaction — so no
+/// platform split is needed here. (An earlier version used `ReplaceFileW`
+/// directly for its attribute/ACL-preservation semantics, but it returned
+/// spurious `ERROR_ACCESS_DENIED` in CI; plain `rename` is the better-tested
+/// path and this crate doesn't need ACL preservation for audio files.)
 fn atomic_place(source: &Path, dest: &Path) -> Result<()> {
     let dest_dir = dest.parent().unwrap_or_else(|| Path::new("."));
     let tmp_name = format!(
@@ -137,54 +142,11 @@ fn atomic_place(source: &Path, dest: &Path) -> Result<()> {
         f.sync_all()?;
     }
 
-    let result = swap_in(&tmp_path, dest);
+    let result = fs::rename(&tmp_path, dest).map_err(FileOpsError::from);
     if result.is_err() {
         let _ = fs::remove_file(&tmp_path);
     }
     result
-}
-
-#[cfg(unix)]
-fn swap_in(tmp_path: &Path, dest: &Path) -> Result<()> {
-    fs::rename(tmp_path, dest)?;
-    Ok(())
-}
-
-#[cfg(windows)]
-fn swap_in(tmp_path: &Path, dest: &Path) -> Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows::core::PCWSTR;
-    use windows::Win32::Storage::FileSystem::ReplaceFileW;
-
-    fn wide(path: &Path) -> Vec<u16> {
-        path.as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect()
-    }
-
-    // If `dest` doesn't exist yet (e.g. restoring into a path that was
-    // deleted out-of-band), ReplaceFileW has nothing to replace — fall back
-    // to a plain rename, which is still atomic for a non-existent target.
-    if !dest.exists() {
-        fs::rename(tmp_path, dest)?;
-        return Ok(());
-    }
-
-    let dest_w = wide(dest);
-    let tmp_w = wide(tmp_path);
-    unsafe {
-        ReplaceFileW(
-            PCWSTR(dest_w.as_ptr()),
-            PCWSTR(tmp_w.as_ptr()),
-            PCWSTR::null(),
-            windows::Win32::Storage::FileSystem::REPLACE_FILE_FLAGS(0),
-            None,
-            None,
-        )
-        .map_err(|e| io::Error::from_raw_os_error(e.code().0))?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]
