@@ -6,6 +6,13 @@ on:
       - "v*"
   workflow_dispatch:
 
+# The default GITHUB_TOKEN is read-only for contents unless a workflow
+# explicitly asks for write access — without this, tauri-action's build
+# and signing succeed but the final "create the release" API call 403s
+# with "Resource not accessible by integration".
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
