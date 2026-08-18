@@ -32,6 +32,16 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # tauri-build's build.rs validates that every bundle.resources path
+      # in the (platform-merged) tauri.conf.json exists on disk — it does
+      # this on every `cargo build`/`clippy`/`test`, not just `tauri
+      # build`. tauri.macos.conf.json references the bridge dylib, so it
+      # must exist before any cargo command touches the `desktop` crate.
+      - name: Build keyfinder bridge (macOS)
+        if: matrix.os == 'macos-latest'
+        env:
+          PKG_CONFIG_PATH: /opt/homebrew/lib/pkgconfig
+        run: bash scripts/build-keyfinder-bridge.sh
       - run: cargo fmt --all -- --check
       - name: clippy (macOS, full workspace)
         if: matrix.os == 'macos-latest'
