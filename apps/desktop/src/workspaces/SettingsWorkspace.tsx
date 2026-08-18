@@ -278,7 +278,7 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
     >
       <span
         className={[
-          "absolute top-0.5 w-[18px] h-[18px] rounded-full bg-charcoal-950 transition-transform",
+          "absolute left-0 top-0.5 w-[18px] h-[18px] rounded-full bg-charcoal-950 transition-transform",
           checked ? "translate-x-[19px]" : "translate-x-0.5",
         ].join(" ")}
       />
