@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+          - platform: ubuntu-latest
+            args: ""
+          - platform: windows-latest
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+      - working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      # Isolated bridge dylib for real libkeyfinder-based key detection —
+      # macOS only, built and dropped into src-tauri/resources/ before
+      # `tauri build` runs (see scripts/build-keyfinder-bridge.sh and
+      # crates/keyfinder-bridge/src/lib.rs for why it's kept out of the
+      # main app's own dependency graph). On Linux/Windows this step is
+      # skipped entirely and the app falls back to stratum-dsp for key
+      # detection, same as any Mac without libkeyfinder installed.
+      - name: Build keyfinder bridge (macOS)
+        if: matrix.platform == 'macos-latest'
+        run: |
+          brew install libkeyfinder pkgconf
+          bash scripts/build-keyfinder-bridge.sh
+
+      # TAURI_SIGNING_PRIVATE_KEY (and, if the key was generated with a
+      # password, TAURI_SIGNING_PRIVATE_KEY_PASSWORD) must be set as repo
+      # secrets — see apps/desktop/src-tauri/tauri.conf.json's
+      # plugins.updater.pubkey for the matching public half. Without the
+      # private key present, tauri-action still builds installers but
+      # skips signing, and the updater plugin refuses unsigned updates.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          args: ${{ matrix.args }}
+          tagName: ${{ github.ref_name }}
+          releaseName: "OpenDJ ${{ github.ref_name }}"
+          # Live (not draft/prerelease) so the updater's `.../releases/
+          # latest/download/latest.json` endpoint resolves to it — GitHub's
+          # "latest" release lookup skips both draft and prerelease
+          # releases, which would otherwise leave installed apps unable to
+          # find new versions.
+          releaseDraft: false
+          prerelease: false

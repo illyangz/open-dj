@@ -1,0 +1,15 @@
+[package]
+name = "opendj-metadata"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+lofty.workspace = true
+symphonia = { version = "0.5", features = ["all"] }
+stratum-dsp = "1"
+libloading = "0.8"

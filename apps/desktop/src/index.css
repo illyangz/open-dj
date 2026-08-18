@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/space-grotesk/600.css";
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+
+/* Night Signal — design-direction.md */
+@theme {
+  --color-charcoal-950: #101211;
+  --color-charcoal-900: #171a19;
+  --color-charcoal-800: #1e2221;
+  --color-charcoal-700: #242c2a;
+  --color-parchment: #f4f1e8;
+  --color-parchment-dim: #b9b6ac;
+  --color-signal: #c7f000;
+  --color-signal-dim: #8fa800;
+  --color-teal: #7aa89a;
+  --color-danger: #e5484d;
+
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--color-charcoal-900);
+    color: var(--color-parchment);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-charcoal-700) transparent;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}

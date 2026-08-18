@@ -1,0 +1,18 @@
+[package]
+name = "opendj-keyfinder-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Deliberately built as a standalone cdylib, NOT depended on by any other
+# workspace crate (see src/lib.rs for why). Built and copied into the app
+# bundle's resources by scripts/build-keyfinder-bridge.sh, loaded at
+# runtime via `libloading` from crates/metadata, never linked at compile
+# time by the main app binary.
+[lib]
+name = "opendj_keyfinder_bridge"
+crate-type = ["cdylib"]
+
+[dependencies]
+libkeyfinder-sys = "0.1"

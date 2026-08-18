@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Docs — OpenDJ</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #171a19;
+      --bg-raised: #1a1d1c;
+      --bg-card: #1e2221;
+      --bg-card-hover: #242c2a;
+      --border: #2a332f;
+      --border-subtle: #222a27;
+      --text: #f4f1e8;
+      --text-dim: #b9b6ac;
+      --text-muted: #8a877f;
+      --signal: #c7f000;
+      --signal-dim: #8fa800;
+      --signal-glow: rgba(199, 240, 0, 0.12);
+      --teal: #7aa89a;
+      --amber: #d4a843;
+      --font-display: 'Space Grotesk', system-ui, sans-serif;
+      --font-mono: 'IBM Plex Mono', 'SF Mono', monospace;
+      --max-w: 1120px;
+      --radius: 12px;
+      --radius-sm: 8px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font-display);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--signal); text-decoration: none; transition: color 0.15s; }
+    a:hover { color: var(--signal-dim); }
+
+    code {
+      font-family: var(--font-mono);
+      font-size: 0.88em;
+      background: var(--bg-card-hover);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 6px;
+      color: var(--signal);
+    }
+
+    pre {
+      background: var(--bg-card-hover);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 1.25rem;
+      overflow-x: auto;
+      margin: 1rem 0;
+      line-height: 1.5;
+    }
+    pre code { background: none; border: none; padding: 0; font-size: 0.85rem; color: var(--text-dim); }
+
+    /* ── Nav ─────────────────────────────────────────────────────────── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: rgba(23, 26, 25, 0.88);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .nav-inner {
+      max-width: var(--max-w);
+      margin: 0 auto; padding: 0 2rem;
+      height: 64px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .nav-brand {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 600; font-size: 1.15rem; color: var(--text);
+    }
+    .nav-brand svg { width: 28px; height: 28px; color: var(--signal); }
+    .nav-links { display: flex; gap: 2rem; align-items: center; }
+    .nav-links a { color: var(--text-dim); font-size: 0.9rem; font-weight: 500; transition: color 0.15s; }
+    .nav-links a:hover { color: var(--text); }
+
+    /* ── Layout ──────────────────────────────────────────────────────── */
+    .docs-layout {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 6rem 2rem 4rem;
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 4rem;
+    }
+
+    /* ── Sidebar ─────────────────────────────────────────────────────── */
+    .docs-sidebar {
+      position: sticky; top: 80px;
+      align-self: start;
+    }
+    .docs-sidebar h4 {
+      font-size: 0.7rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.1em;
+      color: var(--text-muted);
+      margin-bottom: 0.75rem;
+      font-family: var(--font-mono);
+    }
+    .docs-sidebar ul { list-style: none; margin-bottom: 1.5rem; }
+    .docs-sidebar li { margin-bottom: 0.25rem; }
+    .docs-sidebar a {
+      display: block;
+      padding: 6px 12px;
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      border-radius: 6px;
+      transition: all 0.15s;
+    }
+    .docs-sidebar a:hover {
+      color: var(--text);
+      background: var(--bg-card-hover);
+    }
+    .docs-sidebar a.active {
+      color: var(--signal);
+      background: var(--signal-glow);
+    }
+
+    /* ── Content ──────────────────────────────────────────────────────── */
+    .docs-content { min-width: 0; }
+    .docs-content h1 {
+      font-size: 2rem; font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.5rem;
+    }
+    .docs-content .subtitle {
+      color: var(--text-dim);
+      font-size: 1.05rem;
+      margin-bottom: 3rem;
+    }
+    .docs-content h2 {
+      font-size: 1.35rem; font-weight: 600;
+      margin-top: 3rem; margin-bottom: 1rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border-subtle);
+    }
+    .docs-content h2:first-of-type { border-top: none; margin-top: 0; }
+    .docs-content h3 {
+      font-size: 1.05rem; font-weight: 600;
+      margin-top: 2rem; margin-bottom: 0.75rem;
+    }
+    .docs-content p {
+      color: var(--text-dim);
+      margin-bottom: 1rem;
+      line-height: 1.7;
+    }
+    .docs-content ul, .docs-content ol {
+      color: var(--text-dim);
+      margin-bottom: 1rem;
+      padding-left: 1.5rem;
+    }
+    .docs-content li { margin-bottom: 0.4rem; }
+
+    .callout {
+      background: var(--bg-card-hover);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--signal);
+      border-radius: var(--radius-sm);
+      padding: 1rem 1.25rem;
+      margin: 1.5rem 0;
+    }
+    .callout p { margin-bottom: 0; color: var(--text-dim); }
+    .callout.warning { border-left-color: var(--amber); }
+    .callout strong { color: var(--text); }
+
+    .cmd-block {
+      background: var(--bg-card-hover);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 1rem 1.25rem;
+      margin: 1rem 0;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      overflow-x: auto;
+    }
+    .cmd-block .prompt { color: var(--signal); user-select: none; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      font-size: 0.9rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    th {
+      font-weight: 600;
+      color: var(--text);
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    td { color: var(--text-dim); }
+
+    /* ── Responsive ──────────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .docs-layout { grid-template-columns: 1fr; gap: 2rem; padding: 5rem 1.5rem 3rem; }
+      .docs-sidebar { position: static; }
+      .nav-links { gap: 1rem; }
+      .nav-links a { font-size: 0.8rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Nav ──────────────────────────────────────────────────────── -->
+<nav>
+  <div class="nav-inner">
+    <a href="/" class="nav-brand">
+      <img src="logo.svg" alt="OpenDJ" width="32" height="32" style="border-radius: 6px;">
+      OpenDJ
+    </a>
+    <div class="nav-links">
+      <a href="index.html">Home</a>
+      <a href="index.html#features">Features</a>
+      <a href="docs.html" style="color: var(--text);">Docs</a>
+      <a href="index.html#cta" class="btn btn-primary" style="padding: 8px 20px; font-size: 0.85rem; display: inline-flex; align-items: center; gap: 6px; background: var(--signal); color: #101211; border-radius: 8px; font-weight: 600; transition: all 0.2s;">Download</a>
+    </div>
+  </div>
+</nav>
+
+<div class="docs-layout">
+  <!-- ── Sidebar ──────────────────────────────────────────────── -->
+  <aside class="docs-sidebar">
+    <h4>Getting Started</h4>
+    <ul>
+      <li><a href="#installation" class="active">Installation</a></li>
+      <li><a href="#quick-start">Quick Start</a></li>
+      <li><a href="#system-requirements">System Requirements</a></li>
+    </ul>
+    <h4>Using OpenDJ</h4>
+    <ul>
+      <li><a href="#downloading">Downloading Tracks</a></li>
+      <li><a href="#supported-sources">Supported Sources</a></li>
+      <li><a href="#soundcloud-likes">SoundCloud Likes</a></li>
+      <li><a href="#organization">Auto-Organization</a></li>
+      <li><a href="#batch-tagging">Batch Tagging</a></li>
+      <li><a href="#repair">Repair & Restore</a></li>
+    </ul>
+    <h4>Configuration</h4>
+    <ul>
+      <li><a href="#settings">Settings Reference</a></li>
+      <li><a href="#concurrency">Concurrency</a></li>
+      <li><a href="#folder-templates">Folder Templates</a></li>
+    </ul>
+    <h4>Advanced</h4>
+    <ul>
+      <li><a href="#cli">CLI Usage</a></li>
+      <li><a href="#troubleshooting">Troubleshooting</a></li>
+    </ul>
+  </aside>
+
+  <!-- ── Content ──────────────────────────────────────────────── -->
+  <main class="docs-content">
+    <h1>Documentation</h1>
+    <p class="subtitle">Everything you need to get OpenDJ running and making the most of your library.</p>
+
+    <!-- Installation -->
+    <h2 id="installation">Installation</h2>
+
+    <h3>macOS (recommended)</h3>
+    <p>Download the latest <code>.dmg</code> from the <a href="index.html#cta">download page</a>, open it, and drag OpenDJ to your Applications folder.</p>
+
+    <p>OpenDJ requires <strong>yt-dlp</strong> and <strong>ffmpeg</strong> for downloading and converting audio. Install them with Homebrew:</p>
+    <div class="cmd-block">
+      <span class="prompt">$ </span>brew install yt-dlp ffmpeg
+    </div>
+
+    <div class="callout">
+      <p><strong>First launch:</strong> macOS may warn that OpenDJ is from an unidentified developer. Go to <em>System Settings &rarr; Privacy &amp; Security</em> and click "Open Anyway".</p>
+    </div>
+
+    <h3>From source</h3>
+    <p>If you want to build from source, you'll need Rust, Node.js, and pnpm:</p>
+    <div class="cmd-block">
+      <span class="prompt">$ </span>git clone https://github.com/anthropics/total-dj.git<br>
+      <span class="prompt">$ </span>cd total-dj<br>
+      <span class="prompt">$ </span>pnpm install<br>
+      <span class="prompt">$ </span>cargo tauri dev
+    </div>
+
+    <!-- Quick Start -->
+    <h2 id="quick-start">Quick Start</h2>
+    <ol>
+      <li>Open OpenDJ</li>
+      <li>Choose a download folder in <strong>Settings</strong> (or use the default)</li>
+      <li>Paste a link into the <strong>Queue</strong> tab &mdash; any URL from YouTube, SoundCloud, etc.</li>
+      <li>Tracks download automatically, convert to 320kbps MP3, and organize into your folder structure</li>
+    </ol>
+
+    <!-- System Requirements -->
+    <h2 id="system-requirements">System Requirements</h2>
+    <table>
+      <tr><th>Component</th><th>Requirement</th></tr>
+      <tr><td>OS</td><td>macOS 12+ (Monterey or later)</td></tr>
+      <tr><td>RAM</td><td>4 GB minimum, 8 GB recommended</td></tr>
+      <tr><td>Disk</td><td>200 MB for app + space for your library</td></tr>
+      <tr><td>Dependencies</td><td>yt-dlp, ffmpeg (installed via Homebrew)</td></tr>
+    </table>
+
+    <!-- Downloading Tracks -->
+    <h2 id="downloading">Downloading Tracks</h2>
+    <p>OpenDJ accepts input in three ways:</p>
+    <ul>
+      <li><strong>Paste</strong> &mdash; Paste a URL directly into the Queue tab (Cmd+V)</li>
+      <li><strong>Drop</strong> &mdash; Drag and drop a URL or local audio file anywhere in the window</li>
+      <li><strong>Batch</strong> &mdash; Paste multiple URLs, one per line. Playlists are automatically expanded.</li>
+    </ul>
+
+    <p>Each track goes through the pipeline:</p>
+    <ol>
+      <li><strong>Resolve</strong> &mdash; Metadata is fetched from the source (title, artist, artwork, BPM, key)</li>
+      <li><strong>Download</strong> &mdash; Audio is downloaded at the highest available quality</li>
+      <li><strong>Convert</strong> &mdash; ffmpeg converts to MP3 320kbps if needed</li>
+      <li><strong>Tag</strong> &mdash; ID3 tags are written (title, artist, album, artwork, genre, etc.)</li>
+      <li><strong>Organize</strong> &mdash; File is moved to the destination folder based on your template</li>
+    </ol>
+
+    <!-- Supported Sources -->
+    <h2 id="supported-sources">Supported Sources</h2>
+    <p>OpenDJ uses yt-dlp under the hood, which supports <strong>1800+ sites</strong>. The most common for DJs:</p>
+    <table>
+      <tr><th>Source</th><th>Audio Quality</th><th>Notes</th></tr>
+      <tr><td>YouTube</td><td>Up to 320kbps</td><td>Best audio format selected automatically</td></tr>
+      <tr><td>SoundCloud</td><td>Up to 320kbps</td><td>Direct API download, no yt-dlp needed</td></tr>
+      <tr><td>Beatport</td><td>320kbps MP3</td><td>Full metadata including BPM &amp; key</td></tr>
+      <tr><td>Bandcamp</td><td>Up to FLAC/320</td><td>Downloads the highest quality available</td></tr>
+      <tr><td>Spotify</td><td>Metadata only</td><td>DRM-protected &mdash; falls back to YouTube search</td></tr>
+      <tr><td>Apple Music</td><td>Metadata only</td><td>DRM-protected &mdash; falls back to YouTube search</td></tr>
+    </table>
+
+    <div class="callout warning">
+      <p><strong>DRM notice:</strong> Spotify, Apple Music, and Deezer tracks are DRM-protected and cannot be downloaded directly. OpenDJ will search YouTube for a matching track when possible. Always respect copyright.</p>
+    </div>
+
+    <!-- SoundCloud Likes -->
+    <h2 id="soundcloud-likes">SoundCloud Likes</h2>
+    <p>The <strong>SoundCloud</strong> tab lets you fetch and download any SoundCloud user's liked tracks:</p>
+    <ol>
+      <li>Enter a SoundCloud username (or paste their profile URL)</li>
+      <li>Click <strong>Fetch Likes</strong> &mdash; OpenDJ fetches their entire likes library via the SoundCloud API</li>
+      <li>Browse the results, search by title or artist</li>
+      <li>Click <strong>MP3</strong> on individual tracks, or <strong>Download All MP3</strong> for the whole list</li>
+    </ol>
+
+    <p>No API key is required. OpenDJ auto-detects SoundCloud's client ID from their website &mdash; the same approach used by browser extensions and scripts.</p>
+
+    <!-- Auto-Organization -->
+    <h2 id="organization">Auto-Organization</h2>
+    <p>OpenDJ organizes downloaded tracks using a configurable folder template. The default is:</p>
+    <div class="cmd-block">{artist}/{album}/{title}</div>
+
+    <p>Available template variables:</p>
+    <table>
+      <tr><th>Variable</th><th>Description</th></tr>
+      <tr><td><code>{artist}</code></td><td>Track artist (or uploader if no artist tag)</td></tr>
+      <tr><td><code>{album}</code></td><td>Album name (if available)</td></tr>
+      <tr><td><code>{title}</code></td><td>Track title</td></tr>
+      <tr><td><code>{genre}</code></td><td>Genre tag</td></tr>
+      <tr><td><code>{bpm}</code></td><td>BPM (if detected)</td></tr>
+      <tr><td><code>{key}</code></td><td>Musical key (if detected)</td></tr>
+      <tr><td><code>{year}</code></td><td>Release year</td></tr>
+    </table>
+
+    <!-- Batch Tagging -->
+    <h2 id="batch-tagging">Batch Tagging</h2>
+    <p>Select multiple tracks in the Queue and edit their tags simultaneously. Useful for:</p>
+    <ul>
+      <li>Fixing artist capitalization across a set</li>
+      <li>Adding a genre to a batch of tracks</li>
+      <li>Normalizing title formatting</li>
+    </ul>
+
+    <!-- Repair & Restore -->
+    <h2 id="repair">Repair &amp; Restore</h2>
+    <p>Every file mutation OpenDJ makes is journaled with a checksum. The <strong>Repair</strong> tab shows:</p>
+    <ul>
+      <li>All modifications made to your library</li>
+      <li>Original file backups (stored alongside or in a backup directory)</li>
+      <li>One-click restore to revert any change</li>
+    </ul>
+
+    <div class="callout">
+      <p><strong>Your files are safe.</strong> OpenDJ never deletes originals without creating a backup first. The journal is your audit trail.</p>
+    </div>
+
+    <!-- Settings Reference -->
+    <h2 id="settings">Settings Reference</h2>
+    <table>
+      <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+      <tr><td>Download folder</td><td>App data folder</td><td>Where downloaded tracks are saved</td></tr>
+      <tr><td>Folder template</td><td><code>{artist}/{album}/{title}</code></td><td>Organizational structure for downloaded tracks</td></tr>
+      <tr><td>Network concurrency</td><td>6</td><td>How many tracks download simultaneously (1&ndash;16)</td></tr>
+      <tr><td>File mutation concurrency</td><td>1</td><td>How many file renames/moves happen in parallel</td></tr>
+      <tr><td>Analytics</td><td>Off</td><td>Anonymous usage stats (never includes file paths or audio)</td></tr>
+    </table>
+
+    <!-- Concurrency -->
+    <h2 id="concurrency">Concurrency</h2>
+    <p>OpenDJ downloads tracks in parallel. The default concurrency is <strong>6</strong>, which means 6 tracks download at the same time.</p>
+    <ul>
+      <li><strong>1&ndash;2</strong> &mdash; Conservative, good for slow connections</li>
+      <li><strong>4&ndash;6</strong> &mdash; Balanced, works well on most connections</li>
+      <li><strong>8&ndash;16</strong> &mdash; Aggressive, use on fast connections with high bandwidth</li>
+    </ul>
+
+    <p>You can adjust this in <strong>Settings &rarr; Concurrency &rarr; Simultaneous network jobs</strong>.</p>
+
+    <!-- Folder Templates -->
+    <h2 id="folder-templates">Folder Templates</h2>
+    <p>Templates use <code>{variable}</code> syntax. Slashes create subdirectories. Unknown variables are skipped.</p>
+    <p>Examples:</p>
+    <div class="cmd-block">
+      {artist}/{title}           &rarr;  Artist Name/Track Title.mp3<br>
+      {genre}/{artist} - {title} &rarr;  House/DJ Name - Some Track.mp3<br>
+      {bpm}bpm/{artist}/{title}  &rarr;  128bpm/Artist/Track.mp3
+    </div>
+
+    <!-- CLI -->
+    <h2 id="cli">CLI Usage</h2>
+    <p>OpenDJ is a GUI application, but you can use yt-dlp directly from the command line for scripting:</p>
+    <div class="cmd-block">
+      <span class="prompt">$ </span>yt-dlp -x --audio-format mp3 --audio-quality 320K "URL"<br>
+      <span class="prompt">$ </span>yt-dlp --flat-playlist --dump-json "PLAYLIST_URL" | jq '.title'
+    </div>
+
+    <!-- Troubleshooting -->
+    <h2 id="troubleshooting">Troubleshooting</h2>
+
+    <h3>"yt-dlp not found"</h3>
+    <p>Install yt-dlp: <code>brew install yt-dlp</code>. If already installed, check that it's in your PATH.</p>
+
+    <h3>"ffmpeg not found"</h3>
+    <p>Install ffmpeg: <code>brew install ffmpeg</code>.</p>
+
+    <h3>Downloads are slow</h3>
+    <p>Check your network concurrency setting. Default is 6 simultaneous downloads. Increase to 8&ndash;16 on fast connections.</p>
+
+    <h3>Spotify/Apple Music tracks not downloading</h3>
+    <p>These services use DRM protection. OpenDJ searches YouTube for a matching track instead. The match quality varies.</p>
+
+    <h3>SoundCloud client_id not detected</h3>
+    <p>SoundCloud periodically rotates their JavaScript assets. If detection fails, restart OpenDJ to re-fetch the latest scripts.</p>
+
+    <h3>macOS blocks the app</h3>
+    <p>Go to <em>System Settings &rarr; Privacy &amp; Security</em> and click "Open Anyway" next to the OpenDJ warning.</p>
+
+    <div style="margin-top: 4rem; padding-top: 2rem; border-top: 1px solid var(--border-subtle); text-align: center;">
+      <p style="color: var(--text-muted); font-size: 0.85rem;">
+        Can't find what you need? <a href="https://github.com" target="_blank">Open an issue on GitHub</a>.
+      </p>
+    </div>
+  </main>
+</div>
+
+<!-- ── Footer ───────────────────────────────────────────────────── -->
+<footer style="border-top: 1px solid var(--border-subtle); padding: 2rem;">
+  <div style="max-width: var(--max-w); margin: 0 auto; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+    <div style="display: flex; align-items: center; gap: 10px; font-size: 0.85rem; color: var(--text-muted);">
+      <img src="logo.svg" alt="" width="20" height="20" style="border-radius: 4px;">
+      OpenDJ &middot; Local-first DJ prep
+    </div>
+    <div style="display: flex; gap: 1.5rem;">
+      <a href="docs.html" style="font-size: 0.85rem; color: var(--text-muted);">Docs</a>
+      <a href="index.html#features" style="font-size: 0.85rem; color: var(--text-muted);">Features</a>
+      <a href="https://github.com" target="_blank" style="font-size: 0.85rem; color: var(--text-muted);">GitHub</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

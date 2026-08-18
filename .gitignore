@@ -1,0 +1,38 @@
+# Rust
+/target/
+crates/*/target/
+apps/desktop/src-tauri/target/
+Cargo.lock.bak
+
+# Node
+node_modules/
+apps/desktop/dist/
+apps/desktop/dist-ssr/
+*.local
+
+# Tauri
+apps/desktop/src-tauri/gen/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# App data (local dev)
+*.sqlite3
+*.sqlite3-journal
+/dev-data/
+
+# Env / secrets
+.env
+.env.*
+!.env.example

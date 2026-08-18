@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenDJ — Local-First DJ Music Preparation</title>
+  <meta name="description" content="Download, organize, and prepare tracks for your DJ sets. Local-first, privacy-respecting, no subscriptions.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #171a19;
+      --bg-raised: #1a1d1c;
+      --bg-card: #1e2221;
+      --bg-card-hover: #242c2a;
+      --border: #2a332f;
+      --border-subtle: #222a27;
+      --text: #f4f1e8;
+      --text-dim: #b9b6ac;
+      --text-muted: #8a877f;
+      --signal: #c7f000;
+      --signal-dim: #8fa800;
+      --signal-glow: rgba(199, 240, 0, 0.12);
+      --teal: #7aa89a;
+      --amber: #d4a843;
+      --font-display: 'Space Grotesk', system-ui, sans-serif;
+      --font-mono: 'IBM Plex Mono', 'SF Mono', monospace;
+      --max-w: 1120px;
+      --radius: 12px;
+      --radius-sm: 8px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font-display);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    a { color: var(--signal); text-decoration: none; transition: color 0.15s; }
+    a:hover { color: var(--signal-dim); }
+
+    /* ── Nav ─────────────────────────────────────────────────────────── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: rgba(23, 26, 25, 0.88);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .nav-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 0 2rem;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .nav-brand {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 600; font-size: 1.15rem; color: var(--text);
+    }
+    .nav-brand svg { width: 28px; height: 28px; color: var(--signal); }
+    .nav-links { display: flex; gap: 2rem; align-items: center; }
+    .nav-links a {
+      color: var(--text-dim); font-size: 0.9rem; font-weight: 500;
+      transition: color 0.15s;
+    }
+    .nav-links a:hover { color: var(--text); }
+
+    /* ── Hero ────────────────────────────────────────────────────────── */
+    .hero {
+      position: relative;
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      text-align: center;
+      padding: 6rem 2rem 4rem;
+    }
+    .hero::before {
+      content: '';
+      position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse 70% 50% at 50% 20%, rgba(199, 240, 0, 0.04) 0%, transparent 70%),
+        radial-gradient(circle at 30% 60%, rgba(122, 168, 154, 0.03) 0%, transparent 40%);
+      pointer-events: none;
+    }
+    .hero-content { position: relative; max-width: 720px; }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 6px 16px;
+      font-size: 0.8rem; font-weight: 500;
+      color: var(--text-dim);
+      margin-bottom: 2rem;
+      font-family: var(--font-mono);
+    }
+    .hero-badge .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--signal);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .hero h1 {
+      font-size: clamp(2.8rem, 6vw, 4.5rem);
+      font-weight: 700;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      margin-bottom: 1.5rem;
+    }
+    .hero h1 .accent { color: var(--signal); }
+    .hero p {
+      font-size: 1.15rem;
+      color: var(--text-dim);
+      max-width: 540px;
+      margin: 0 auto 2.5rem;
+      line-height: 1.7;
+    }
+    .hero-buttons { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+
+    /* ── Buttons ─────────────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 12px 28px;
+      border-radius: var(--radius);
+      font-family: var(--font-display);
+      font-size: 0.95rem; font-weight: 600;
+      border: none; cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: var(--signal);
+      color: #101211;
+    }
+    .btn-primary:hover {
+      box-shadow: 0 0 20px rgba(199, 240, 0, 0.3), 0 0 50px rgba(199, 240, 0, 0.1);
+      transform: translateY(-1px);
+    }
+    .btn-secondary {
+      background: var(--bg-card);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover {
+      box-shadow: 0 0 16px rgba(199, 240, 0, 0.15);
+      transform: translateY(-1px);
+    }
+    .btn svg { width: 18px; height: 18px; }
+
+    /* ── Sections ────────────────────────────────────────────────────── */
+    section { padding: 6rem 2rem; }
+    .section-inner { max-width: var(--max-w); margin: 0 auto; }
+    .section-label {
+      font-size: 0.75rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.1em;
+      color: var(--signal); margin-bottom: 0.75rem;
+      font-family: var(--font-mono);
+    }
+    .section-title {
+      font-size: clamp(1.8rem, 4vw, 2.5rem);
+      font-weight: 700; letter-spacing: -0.02em;
+      margin-bottom: 1rem;
+    }
+    .section-desc {
+      font-size: 1.05rem; color: var(--text-dim);
+      max-width: 560px; line-height: 1.7;
+      margin-bottom: 3rem;
+    }
+
+    /* ── Features Grid ───────────────────────────────────────────────── */
+    #features {
+      background: var(--bg-raised);
+      border-top: 1px solid var(--border-subtle);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1px;
+      background: var(--border-subtle);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .feature-card {
+      background: var(--bg-card);
+      padding: 2rem;
+      transition: background 0.2s;
+    }
+    .feature-card:hover { background: var(--bg-card-hover); }
+    .feature-icon {
+      width: 40px; height: 40px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: var(--radius-sm);
+      background: var(--signal-glow);
+      color: var(--signal);
+      margin-bottom: 1rem;
+    }
+    .feature-icon svg { width: 20px; height: 20px; }
+    .feature-card h3 {
+      font-size: 1.05rem; font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+    .feature-card p {
+      font-size: 0.9rem; color: var(--text-dim);
+      line-height: 1.6;
+    }
+
+    /* ── How It Works ────────────────────────────────────────────────── */
+    .steps { display: flex; gap: 2rem; flex-wrap: wrap; }
+    .step {
+      flex: 1; min-width: 220px;
+      position: relative;
+      padding: 1.5rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .step:hover {
+      border-color: var(--signal);
+      background: var(--bg-card-hover);
+    }
+    .step-num {
+      font-family: var(--font-mono);
+      font-size: 0.75rem; font-weight: 500;
+      color: var(--signal);
+      margin-bottom: 0.75rem;
+    }
+    .step h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; }
+    .step p { font-size: 0.85rem; color: var(--text-dim); line-height: 1.6; }
+
+    /* ── Platforms ───────────────────────────────────────────────────── */
+    .platforms {
+      display: flex; gap: 1rem; flex-wrap: wrap;
+      margin-top: 2rem;
+    }
+    .platform-tag {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 16px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 0.85rem; font-weight: 500;
+      color: var(--text-dim);
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .platform-tag:hover {
+      border-color: var(--signal);
+      color: var(--text);
+    }
+    .platform-tag .dot {
+      width: 5px; height: 5px; border-radius: 50%;
+      background: var(--signal);
+    }
+
+    /* ── Coming Soon ─────────────────────────────────────────────────── */
+    .coming-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1rem;
+    }
+    .coming-card {
+      padding: 1.5rem;
+      background: var(--bg-card-hover);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .coming-card:hover {
+      border-color: var(--signal);
+      background: var(--bg-card-hover);
+    }
+    .coming-card h3 {
+      font-size: 0.95rem; font-weight: 600;
+      margin-bottom: 0.35rem;
+    }
+    .coming-card p {
+      font-size: 0.8rem; color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .coming-badge {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 0.65rem; font-weight: 500;
+      color: var(--amber);
+      background: rgba(212, 168, 67, 0.1);
+      border: 1px solid rgba(212, 168, 67, 0.2);
+      border-radius: 4px;
+      padding: 2px 8px;
+      margin-bottom: 0.75rem;
+    }
+
+    /* ── CTA ─────────────────────────────────────────────────────────── */
+    #cta {
+      text-align: center;
+      background: var(--bg-raised);
+      border-top: 1px solid var(--border-subtle);
+    }
+    #cta .section-title { margin-bottom: 0.5rem; }
+    #cta .section-desc { margin: 0 auto 2rem; text-align: center; }
+
+    /* ── Footer ──────────────────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border-subtle);
+      padding: 3rem 2rem;
+    }
+    .footer-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      display: flex; justify-content: space-between; align-items: center;
+      flex-wrap: wrap; gap: 1rem;
+    }
+    .footer-left {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 0.85rem; color: var(--text-muted);
+    }
+    .footer-left svg { width: 20px; height: 20px; color: var(--text-muted); }
+    .footer-links { display: flex; gap: 1.5rem; }
+    .footer-links a { font-size: 0.85rem; color: var(--text-muted); }
+    .footer-links a:hover { color: var(--text); }
+
+    /* ── Responsive ──────────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .nav-links { gap: 1rem; }
+      .nav-links a { font-size: 0.8rem; }
+      .hero { padding: 5rem 1.5rem 3rem; min-height: auto; }
+      section { padding: 4rem 1.5rem; }
+      .features-grid { grid-template-columns: 1fr; }
+      .steps { flex-direction: column; }
+      .hero-buttons { gap: 0.75rem; }
+      .hero-buttons .btn { padding: 10px 20px; font-size: 0.85rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Nav ──────────────────────────────────────────────────────── -->
+<nav>
+  <div class="nav-inner">
+    <a href="/" class="nav-brand">
+      <img src="logo.svg" alt="OpenDJ" width="32" height="32" style="border-radius: 6px;">
+      OpenDJ
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="docs.html">Docs</a>
+      <a href="#coming-soon">Roadmap</a>
+      <a href="#cta" class="btn btn-primary" style="padding: 8px 20px; font-size: 0.85rem;">Download</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ── Hero ─────────────────────────────────────────────────────── -->
+<section class="hero">
+  <div class="hero-content">
+    <div class="hero-badge">
+      <span class="dot"></span>
+      local-first &middot; v0.2.0
+    </div>
+    <h1>Drop a track.<br><span class="accent">Keep control.</span></h1>
+    <p>
+      Download, organize, and prepare tracks for your DJ sets.
+      No cloud sync. No subscriptions. Your library stays on your machine.
+    </p>
+    <div class="hero-buttons">
+      <a href="#cta" class="btn btn-primary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download for macOS
+      </a>
+      <a href="#cta" class="btn btn-secondary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Windows
+      </a>
+      <a href="#cta" class="btn btn-secondary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Linux
+      </a>
+      <a href="docs.html" class="btn btn-secondary">
+        Read the Docs
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ── Features ─────────────────────────────────────────────────── -->
+<section id="features">
+  <div class="section-inner">
+    <p class="section-label">Features</p>
+    <h2 class="section-title">Everything you need. Nothing you don't.</h2>
+    <p class="section-desc">
+      Built for DJs who want speed and control, not another cloud platform.
+    </p>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </div>
+        <h3>Universal Downloads</h3>
+        <p>Paste a link from YouTube, SoundCloud, Beatport, or 1800+ other sites. Downloads as 320kbps MP3. No API keys needed.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        </div>
+        <h3>Auto-Organize</h3>
+        <p>Template-based folder organization. Set it once: <code style="font-family: var(--font-mono); font-size: 0.85em; color: var(--signal);">{artist}/{album}/{title}</code> and every track lands in the right place.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <h3>Backup & Restore</h3>
+        <p>Every file mutation is journaled. One click to restore originals. Your library is never at risk.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </div>
+        <h3>Smart Search</h3>
+        <p>Search your entire library by title, artist, BPM, key, genre, or any tag. Instant results, even with 50k+ tracks.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        </div>
+        <h3>Batch Tagging</h3>
+        <p>Edit ID3 tags on dozens of tracks at once. Fix artist names, add genres, normalize capitalization in bulk.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        </div>
+        <h3>Parallel Downloads</h3>
+        <p>Download up to 16 tracks simultaneously. Adjustable concurrency in settings. Saturate your connection.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+        </div>
+        <h3>Key & BPM Analysis</h3>
+        <p>Automatic Camelot key detection and BPM analysis using libkeyfinder. Harmonic mixing made easy.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </div>
+        <h3>Waveform Preview</h3>
+        <p>Scrollable waveform display with beat markers. Preview tracks and seek by clicking the waveform.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+        </div>
+        <h3>SoundCloud Likes</h3>
+        <p>Paste a SoundCloud username to fetch and download their entire likes library. Direct API — no API key needed.</p>
+      </div>
+    </div>
+</section>
+
+<!-- ── How It Works ─────────────────────────────────────────────── -->
+<section>
+  <div class="section-inner">
+    <p class="section-label">How it works</p>
+    <h2 class="section-title">Three steps. That's it.</h2>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">01</div>
+        <h3>Paste a link</h3>
+        <p>Drop any URL from YouTube, SoundCloud, Beatport, Spotify, or a local file path. OpenDJ detects the source automatically.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">02</div>
+        <h3>We handle the rest</h3>
+        <p>yt-dlp downloads the best quality available. ffmpeg converts to MP3 320kbps. Tags are pulled from the source.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">03</div>
+        <h3>Organized instantly</h3>
+        <p>Tracks land in your library, organized by your template. Ready for your DJ software. All on your local disk.</p>
+      </div>
+    </div>
+
+    <div class="platforms">
+      <span class="platform-tag"><span class="dot"></span> YouTube</span>
+      <span class="platform-tag"><span class="dot"></span> SoundCloud</span>
+      <span class="platform-tag"><span class="dot"></span> Beatport</span>
+      <span class="platform-tag"><span class="dot"></span> Bandcamp</span>
+      <span class="platform-tag"><span class="dot"></span> Spotify (metadata)</span>
+      <span class="platform-tag"><span class="dot"></span> Apple Music (metadata)</span>
+      <span class="platform-tag"><span class="dot"></span> 1800+ more</span>
+    </div>
+  </div>
+</section>
+
+<!-- ── Coming Soon ──────────────────────────────────────────────── -->
+<section id="coming-soon">
+  <div class="section-inner">
+    <p class="section-label">Roadmap</p>
+    <h2 class="section-title">Coming soon</h2>
+    <p class="section-desc">
+      OpenDJ is actively developed. Here's what's next.
+    </p>
+
+    <div class="coming-grid">
+      <div class="coming-card">
+        <span class="coming-badge">Planned</span>
+        <h3>Rekordbox / Serato Export</h3>
+        <p>Export organized libraries directly to Rekordbox XML or Serato crates. Hot cues and beat grids preserved.</p>
+      </div>
+
+      <div class="coming-card">
+        <span class="coming-badge">Planned</span>
+        <h3>Duplicate Detection</h3>
+        <p>Checksum-based duplicate finder across your library. Merge metadata, remove redundant copies safely.</p>
+      </div>
+
+      <div class="coming-card">
+        <span class="coming-badge">Planned</span>
+        <h3>Smart Playlists</h3>
+        <p>Auto-updating smart playlists based on rules: BPM range, key, genre, date added, play count, and more.</p>
+      </div>
+
+      <div class="coming-card">
+        <span class="coming-badge">Planned</span>
+        <h3>Set Builder</h3>
+        <p>Build DJ sets with harmonic mixing suggestions. Drag tracks into a timeline, see key compatibility at a glance.</p>
+      </div>
+
+      <div class="coming-card">
+        <span class="coming-badge">Planned</span>
+        <h3>Track Recommendations</h3>
+        <p>AI-powered next-track suggestions based on BPM, key, energy, and your historical set patterns.</p>
+      </div>
+
+      <div class="coming-card">
+        <span class="coming-badge">Planned</span>
+        <h3>Mobile Companion</h3>
+        <p>Browse and rate your library from your phone while away from the laptop. Sync ratings back when you reconnect.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── CTA ──────────────────────────────────────────────────────── -->
+<section id="cta">
+  <div class="section-inner" style="text-align: center;">
+    <p class="section-label">Get started</p>
+    <h2 class="section-title">Your music. Your machine.</h2>
+    <p class="section-desc">
+      Free and open source. No account required. Download, run, and start preparing your sets.
+    </p>
+    <div class="hero-buttons" style="justify-content: center;">
+      <a href="#" class="btn btn-primary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        macOS
+      </a>
+      <a href="#" class="btn btn-secondary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Windows
+      </a>
+      <a href="#" class="btn btn-secondary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Linux
+      </a>
+      <a href="https://github.com" class="btn btn-secondary" target="_blank">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ── Footer ───────────────────────────────────────────────────── -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-left">
+      <img src="logo.svg" alt="" width="20" height="20" style="border-radius: 4px;">
+      <span>OpenDJ &middot; Local-first DJ prep</span>
+    </div>
+    <div class="footer-links">
+      <a href="docs.html">Docs</a>
+      <a href="#features">Features</a>
+      <a href="#coming-soon">Roadmap</a>
+      <a href="https://github.com" target="_blank">GitHub</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
