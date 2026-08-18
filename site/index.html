@@ -70,11 +70,15 @@
     }
     .nav-brand svg { width: 28px; height: 28px; color: var(--signal); }
     .nav-links { display: flex; gap: 2rem; align-items: center; }
-    .nav-links a {
+    /* :not(.btn) — otherwise these (higher-specificity: class+element vs
+       .btn-primary's single class) clobber the Download button's own
+       color/weight, leaving it dim gray text on bright lime instead of
+       the intended high-contrast near-black. */
+    .nav-links a:not(.btn) {
       color: var(--text-dim); font-size: 0.9rem; font-weight: 500;
       transition: color 0.15s;
     }
-    .nav-links a:hover { color: var(--text); }
+    .nav-links a:not(.btn):hover { color: var(--text); }
 
     /* ── Hero ────────────────────────────────────────────────────────── */
     .hero {
@@ -139,10 +143,13 @@
       font-size: 0.95rem; font-weight: 600;
       border: none; cursor: pointer;
       transition: all 0.2s;
+      hover-text-color: #000000;
+
     }
     .btn-primary {
       background: var(--signal);
       color: #101211;
+      font-weight: 700;
     }
     .btn-primary:hover {
       box-shadow: 0 0 20px rgba(199, 240, 0, 0.3), 0 0 50px rgba(199, 240, 0, 0.1);
@@ -241,6 +248,75 @@
     .step h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; }
     .step p { font-size: 0.85rem; color: var(--text-dim); line-height: 1.6; }
 
+    /* ── Screenshots ─────────────────────────────────────────────────── */
+    #screenshots {
+      background: var(--bg-raised);
+      border-top: 1px solid var(--border-subtle);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    /* Arrows overlay the image edges rather than flanking it as separate
+       flex items — the image always gets the section's full width, and
+       the arrows stay a fixed comfortable tap-target size, so nothing
+       needs to shrink or reflow between desktop and mobile. */
+    .carousel {
+      position: relative;
+      width: 100%;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .carousel-frame {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 10;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+    }
+    .carousel-frame img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: top;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+    .carousel-frame img.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .carousel-arrow {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 40px; height: 40px;
+      border-radius: 50%;
+      background: rgba(23, 26, 25, 0.85);
+      backdrop-filter: blur(6px);
+      border: 1px solid var(--border);
+      color: var(--text);
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: border-color 0.2s, color 0.2s, background 0.2s;
+      z-index: 2;
+    }
+    .carousel-arrow:hover {
+      border-color: var(--signal);
+      color: var(--signal);
+    }
+    #carousel-prev { left: 12px; }
+    #carousel-next { right: 12px; }
+    .carousel-arrow svg { width: 18px; height: 18px; }
+    .carousel-caption {
+      text-align: center;
+      margin-top: 1.5rem;
+      color: var(--text-dim);
+      font-size: 0.9rem;
+    }
+
     /* ── Platforms ───────────────────────────────────────────────────── */
     .platforms {
       display: flex; gap: 1rem; flex-wrap: wrap;
@@ -334,13 +410,20 @@
     /* ── Responsive ──────────────────────────────────────────────────── */
     @media (max-width: 768px) {
       .nav-links { gap: 1rem; }
-      .nav-links a { font-size: 0.8rem; }
+      .nav-links a:not(.btn) { font-size: 0.8rem; }
       .hero { padding: 5rem 1.5rem 3rem; min-height: auto; }
       section { padding: 4rem 1.5rem; }
       .features-grid { grid-template-columns: 1fr; }
       .steps { flex-direction: column; }
       .hero-buttons { gap: 0.75rem; }
       .hero-buttons .btn { padding: 10px 20px; font-size: 0.85rem; }
+    }
+    /* Below ~560px, "Features / Docs / Roadmap" plus the Download button
+       no longer fit the nav bar in one row and start clipping off-screen
+       — drop the secondary text links and keep just the logo + primary
+       download CTA (Docs is still reachable from the footer). */
+    @media (max-width: 560px) {
+      .nav-links a:not(.btn) { display: none; }
     }
   </style>
 </head>
@@ -357,7 +440,7 @@
       <a href="#features">Features</a>
       <a href="docs.html">Docs</a>
       <a href="#coming-soon">Roadmap</a>
-      <a href="#cta" class="btn btn-primary" style="padding: 8px 20px; font-size: 0.85rem;">Download</a>
+      <a href="#cta" class="btn btn-primary text-black" style="padding: 8px 20px; font-size: 0.85rem;">Download</a>
     </div>
   </div>
 </nav>
@@ -514,6 +597,45 @@
   </div>
 </section>
 
+<!-- ── Screenshots ──────────────────────────────────────────────── -->
+<section id="screenshots">
+  <div class="section-inner">
+    <p class="section-label">See it in action</p>
+    <h2 class="section-title">Built for the whole workflow.</h2>
+    <p class="section-desc">From queue to key-sorted crate — one app, no context switching.</p>
+
+    <div class="carousel">
+      <button class="carousel-arrow" id="carousel-prev" aria-label="Previous screenshot">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <div class="carousel-frame">
+        <img src="opendj-pic.png" alt="OpenDJ Queue" class="active" data-caption="Queue — paste a link and watch it download, tag, and organize itself.">
+        <img src="opendj-sort.png" alt="OpenDJ Sort" data-caption="Sort — every track grouped by Camelot key, sorted by BPM within each.">
+        <img src="open-dj-library.png" alt="OpenDJ Library" data-caption="Library — waveforms, playback, and key/BPM at a glance.">
+      </div>
+      <button class="carousel-arrow" id="carousel-next" aria-label="Next screenshot">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
+    <p class="carousel-caption" id="carousel-caption">Queue — paste a link and watch it download, tag, and organize itself.</p>
+  </div>
+</section>
+<script>
+  (() => {
+    const images = Array.from(document.querySelectorAll(".carousel-frame img"));
+    const caption = document.getElementById("carousel-caption");
+    let index = 0;
+    const show = (next) => {
+      images[index].classList.remove("active");
+      index = (next + images.length) % images.length;
+      images[index].classList.add("active");
+      caption.textContent = images[index].dataset.caption;
+    };
+    document.getElementById("carousel-prev").addEventListener("click", () => show(index - 1));
+    document.getElementById("carousel-next").addEventListener("click", () => show(index + 1));
+  })();
+</script>
+
 <!-- ── Coming Soon ──────────────────────────────────────────────── -->
 <section id="coming-soon">
   <div class="section-inner">
@@ -528,6 +650,12 @@
         <span class="coming-badge">Planned</span>
         <h3>Rekordbox / Serato Export</h3>
         <p>Export organized libraries directly to Rekordbox XML or Serato crates. Hot cues and beat grids preserved.</p>
+      </div>
+
+      <div class="coming-card">
+        <span class="coming-badge">Planned</span>
+        <h3>Format Options</h3>
+        <p>Choose your download format — WAV, FLAC, MP3, and more — instead of always converting to 320kbps MP3.</p>
       </div>
 
       <div class="coming-card">

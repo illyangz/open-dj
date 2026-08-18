@@ -86,8 +86,8 @@
     }
     .nav-brand svg { width: 28px; height: 28px; color: var(--signal); }
     .nav-links { display: flex; gap: 2rem; align-items: center; }
-    .nav-links a { color: var(--text-dim); font-size: 0.9rem; font-weight: 500; transition: color 0.15s; }
-    .nav-links a:hover { color: var(--text); }
+    .nav-links a:not(.btn) { color: var(--text-dim); font-size: 0.9rem; font-weight: 500; transition: color 0.15s; }
+    .nav-links a:not(.btn):hover { color: var(--text); }
 
     /* ── Layout ──────────────────────────────────────────────────────── */
     .docs-layout {
@@ -195,6 +195,8 @@
       border-collapse: collapse;
       margin: 1rem 0;
       font-size: 0.9rem;
+      display: block;
+      overflow-x: auto;
     }
     th, td {
       text-align: left;
@@ -216,6 +218,10 @@
       .docs-sidebar { position: static; }
       .nav-links { gap: 1rem; }
       .nav-links a { font-size: 0.8rem; }
+      table { white-space: nowrap; }
+    }
+    @media (max-width: 560px) {
+      .nav-links a:not(.btn) { display: none; }
     }
   </style>
 </head>
@@ -232,7 +238,7 @@
       <a href="index.html">Home</a>
       <a href="index.html#features">Features</a>
       <a href="docs.html" style="color: var(--text);">Docs</a>
-      <a href="index.html#cta" class="btn btn-primary" style="padding: 8px 20px; font-size: 0.85rem; display: inline-flex; align-items: center; gap: 6px; background: var(--signal); color: #101211; border-radius: 8px; font-weight: 600; transition: all 0.2s;">Download</a>
+      <a href="index.html#cta" class="btn btn-primary" style="padding: 8px 20px; font-size: 0.85rem; display: inline-flex; align-items: center; gap: 6px; background: var(--signal); color: #101211; border-radius: 8px; font-weight: 700; transition: all 0.2s;">Download</a>
     </div>
   </div>
 </nav>
