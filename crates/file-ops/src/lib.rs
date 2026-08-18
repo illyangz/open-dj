@@ -27,6 +27,22 @@ pub enum FileOpsError {
 
 pub type Result<T> = std::result::Result<T, FileOpsError>;
 
+/// Rewraps an `Io` error's message with what was being attempted and on
+/// which path, preserving its `io::ErrorKind` (retry logic elsewhere
+/// matches on kind). Bare `io error: Access is denied` gives no way to
+/// tell which of several fs calls in a multi-step operation actually
+/// failed — this makes that visible both to users (Repair-tab error text)
+/// and in CI logs.
+fn ctx_err(err: FileOpsError, action: &str, path: &Path) -> FileOpsError {
+    match err {
+        FileOpsError::Io(io_err) => FileOpsError::Io(io::Error::new(
+            io_err.kind(),
+            format!("{action} {}: {io_err}", path.display()),
+        )),
+        other => other,
+    }
+}
+
 pub fn checksum_file(path: &Path) -> Result<String> {
     let file = File::open(path)?;
     let mut reader = BufReader::new(file);
@@ -81,12 +97,16 @@ pub fn replace_atomic(
         return Err(FileOpsError::OriginalMissing(original_path.to_path_buf()));
     }
 
-    let original_checksum = checksum_file(original_path)?;
+    let original_checksum = checksum_file(original_path)
+        .map_err(|e| ctx_err(e, "checksumming original", original_path))?;
 
-    fs::create_dir_all(backup_root)?;
+    fs::create_dir_all(backup_root)
+        .map_err(|e| ctx_err(e.into(), "creating backup directory", backup_root))?;
     let backup_path = backup_path_for(original_path, backup_root);
-    fs::copy(original_path, &backup_path)?;
-    let backup_checksum = checksum_file(&backup_path)?;
+    fs::copy(original_path, &backup_path)
+        .map_err(|e| ctx_err(e.into(), "copying original to backup", &backup_path))?;
+    let backup_checksum =
+        checksum_file(&backup_path).map_err(|e| ctx_err(e, "checksumming backup", &backup_path))?;
     if backup_checksum != original_checksum {
         let _ = fs::remove_file(&backup_path);
         return Err(FileOpsError::BackupVerificationFailed(backup_path));
@@ -94,8 +114,10 @@ pub fn replace_atomic(
 
     // Original is now safely backed up and verified. Stage the replacement
     // and only then perform the single atomic swap.
-    let replacement_checksum = checksum_file(candidate_path)?;
-    atomic_place(candidate_path, original_path)?;
+    let replacement_checksum = checksum_file(candidate_path)
+        .map_err(|e| ctx_err(e, "checksumming candidate", candidate_path))?;
+    atomic_place(candidate_path, original_path)
+        .map_err(|e| ctx_err(e, "replacing original with candidate", original_path))?;
 
     Ok(MutationRecord {
         original_path: original_path.to_string_lossy().to_string(),
@@ -112,7 +134,8 @@ pub fn restore_from_backup(backup_path: &Path, original_path: &Path) -> Result<S
     if !backup_path.exists() {
         return Err(FileOpsError::InvalidCandidate(backup_path.to_path_buf()));
     }
-    atomic_place(backup_path, original_path)?;
+    atomic_place(backup_path, original_path)
+        .map_err(|e| ctx_err(e, "restoring backup onto", original_path))?;
     checksum_file(original_path)
 }
 
@@ -136,13 +159,17 @@ fn atomic_place(source: &Path, dest: &Path) -> Result<()> {
     );
     let tmp_path = dest_dir.join(tmp_name);
 
-    fs::copy(source, &tmp_path)?;
+    fs::copy(source, &tmp_path)
+        .map_err(|e| ctx_err(e.into(), "staging replacement copy at", &tmp_path))?;
     {
-        let f = File::open(&tmp_path)?;
-        f.sync_all()?;
+        let f = File::open(&tmp_path)
+            .map_err(|e| ctx_err(e.into(), "reopening staged copy at", &tmp_path))?;
+        f.sync_all()
+            .map_err(|e| ctx_err(e.into(), "syncing staged copy at", &tmp_path))?;
     }
 
-    let result = rename_replacing(&tmp_path, dest).map_err(FileOpsError::from);
+    let result = rename_replacing(&tmp_path, dest)
+        .map_err(|e| ctx_err(e.into(), "renaming staged copy onto", dest));
     if result.is_err() {
         let _ = fs::remove_file(&tmp_path);
     }
