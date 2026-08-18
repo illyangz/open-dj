@@ -162,7 +162,14 @@ fn atomic_place(source: &Path, dest: &Path) -> Result<()> {
     fs::copy(source, &tmp_path)
         .map_err(|e| ctx_err(e.into(), "staging replacement copy at", &tmp_path))?;
     {
-        let f = File::open(&tmp_path)
+        // Must reopen with write access, not just read: `sync_all` calls
+        // `FlushFileBuffers` on Windows, which requires a handle that has
+        // write rights — a read-only `File::open` handle gets
+        // ERROR_ACCESS_DENIED there even though the same call succeeds on
+        // a read-only fd on Unix (different permission model for fsync).
+        let f = fs::OpenOptions::new()
+            .write(true)
+            .open(&tmp_path)
             .map_err(|e| ctx_err(e.into(), "reopening staged copy at", &tmp_path))?;
         f.sync_all()
             .map_err(|e| ctx_err(e.into(), "syncing staged copy at", &tmp_path))?;
