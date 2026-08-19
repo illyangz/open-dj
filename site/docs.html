@@ -260,6 +260,10 @@
       <li><a href="#organization">Auto-Organization</a></li>
       <li><a href="#batch-tagging">Batch Tagging</a></li>
       <li><a href="#repair">Repair & Restore</a></li>
+      <li><a href="#waveform">Colored Waveform & Hot Cues</a></li>
+      <li><a href="#stems">Stem Separation</a></li>
+      <li><a href="#sync">Cloud Sync</a></li>
+      <li><a href="#community">Community</a></li>
     </ul>
     <h4>Configuration</h4>
     <ul>
@@ -407,6 +411,44 @@
     <div class="callout">
       <p><strong>Your files are safe.</strong> OpenDJ never deletes originals without creating a backup first. The journal is your audit trail.</p>
     </div>
+
+    <!-- Colored Waveform & Hot Cues -->
+    <h2 id="waveform">Colored Waveform & Hot Cues</h2>
+    <p>Click a track's title (or the expand icon) in <strong>Library</strong> to open its enlarged waveform. Three color modes are available, switchable from the same view:</p>
+    <ul>
+      <li><strong>RGB</strong> &mdash; low, mid, and high frequencies blended into one continuous color</li>
+      <li><strong>3-Band</strong> &mdash; low/mid/high rendered as distinct solid bands</li>
+      <li><strong>Classic Blue</strong> &mdash; a single-color amplitude waveform, no frequency coloring</li>
+    </ul>
+    <p>Click anywhere on the waveform to set the cue cursor &mdash; the track does not need to be playing. Press <strong>1&ndash;8</strong> to drop or jump to a hot cue at that position.</p>
+
+    <!-- Stem Separation -->
+    <h2 id="stems">Stem Separation</h2>
+    <p>From the same enlarged waveform view, <strong>Download Stems</strong> runs real source separation &mdash; not an EQ filter &mdash; splitting a track into isolated <strong>vocals</strong>, <strong>drums</strong>, <strong>bass</strong>, and <strong>other</strong>. Check the boxes for whichever stems you want to keep.</p>
+    <p>Separation runs fully on-device (CPU) via an ONNX/htdemucs model. The first split on a machine downloads the model (roughly 200MB, one time); every split after that starts immediately. A full track typically takes anywhere from several seconds to a couple of minutes depending on your machine.</p>
+    <div class="callout">
+      <p><strong>All four stems are always computed.</strong> The separation model produces vocals/drums/bass/other together in one pass &mdash; unchecking a stem only skips saving that file, it doesn't speed up the split.</p>
+    </div>
+
+    <!-- Cloud Sync -->
+    <h2 id="sync">Cloud Sync</h2>
+    <p>Turn on <strong>Settings &rarr; Sync</strong> to sync BPM, key, hot cues, and preferences across your devices. There's no account: the first time you enable it, OpenDJ generates a random recovery key on your device and registers it anonymously.</p>
+    <ul>
+      <li>To use the same identity on another device, copy your recovery key from Settings and paste it into "Use on this device" there</li>
+      <li>The recovery key is a secret, not a password &mdash; anyone with it can use your identity, and there's no way to recover it if lost</li>
+      <li>Sync is off by default and never required to use OpenDJ</li>
+    </ul>
+
+    <!-- Community -->
+    <h2 id="community">Community</h2>
+    <p>The <strong>Community</strong> tab is a lightweight, anonymous feed layered on the same recovery-key identity as Sync. Setting a username (from the Community tab or the sidebar) is required to post, upvote, or comment &mdash; not to read.</p>
+    <ul>
+      <li><strong>Share a Crate</strong> &mdash; posts your crate's track list (title/artist/key/BPM, plus a source link wherever OpenDJ can resolve one from your download history) as a metadata snapshot, never the audio itself</li>
+      <li><strong>Share a Song</strong> &mdash; paste any link with a title and optional artist</li>
+      <li><strong>Post</strong> &mdash; plain text, no track attached</li>
+      <li>Upvote, reply in flat (non-threaded) comments, and <strong>@mention</strong> other usernames &mdash; typing <code>@</code> suggests real usernames as you type</li>
+      <li>A <strong>+</strong> button on song/crate shares downloads the song, or creates a local crate matched against tracks you already have</li>
+    </ul>
 
     <!-- Settings Reference -->
     <h2 id="settings">Settings Reference</h2>
