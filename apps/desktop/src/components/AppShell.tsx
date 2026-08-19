@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { useAppStore } from "../store/useAppStore";
 import type { WorkspaceId } from "../types";
 import { Tour } from "./Tour";
@@ -34,6 +35,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   const setTourOpen = useAppStore((s) => s.setTourOpen);
   const jobs = useAppStore((s) => s.jobs);
   const activeCount = jobs.filter((j) => ["waiting", "resolving", "downloading", "converting", "tagging", "organizing"].includes(j.state)).length;
+
+  // Read from the running build itself (tauri.conf.json's `version`, via
+  // Tauri's app API) rather than a hardcoded string — the literal
+  // "v0.2.0" here silently went stale for two releases before anyone
+  // noticed, since nothing forced it to track the real bundle version.
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  useEffect(() => {
+    void getVersion().then(setAppVersion);
+  }, []);
 
   return (
     <div className="h-full flex bg-charcoal-900 text-parchment font-body">
@@ -87,7 +97,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           >
             Take the tour
           </button>
-          <div className="text-[11px] text-parchment-dim/70 font-mono">local-first · v0.2.0</div>
+          <div className="text-[11px] text-parchment-dim/70 font-mono">
+            local-first{appVersion ? ` · v${appVersion}` : ""}
+          </div>
         </div>
       </nav>
 
