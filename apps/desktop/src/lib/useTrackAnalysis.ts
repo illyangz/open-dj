@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { useAppStore } from "../store/useAppStore";
 
 export interface TrackAnalysisState {
   bpm: number | null;
@@ -66,6 +67,9 @@ async function resolveTrack(path: string): Promise<TrackAnalysisState> {
   // analyze_track always persists both fields going forward, so this only
   // has to happen once per file.
   const result = await api.analyzeTrack(path);
+  if (useAppStore.getState().settings?.sync_enabled) {
+    void api.pushTrackSync(path).catch(() => {});
+  }
   return {
     bpm: tagBpm ?? result.bpm,
     key: tagKey ?? (result.key_confidence > KEY_CONFIDENCE_THRESHOLD ? result.key : null),

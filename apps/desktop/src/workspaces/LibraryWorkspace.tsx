@@ -2,11 +2,24 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { api } from "../lib/api";
+import { api, onStemModelDownloadProgress, onStemSplitProgress } from "../lib/api";
 import { useTrackAnalysis } from "../lib/useTrackAnalysis";
 import { useAppStore } from "../store/useAppStore";
-import { PlayIcon, PauseIcon } from "../components/icons";
-import type { Job, PlannedMove, TrackFields } from "../types";
+import { PlayIcon, PauseIcon, ExpandIcon, CloseIcon } from "../components/icons";
+import { ZoomControl } from "../components/ZoomControl";
+import { recolor } from "../lib/waveformColor";
+import type {
+  BandWaveform,
+  Crate,
+  CuePoint,
+  Job,
+  PlannedMove,
+  StemDownloadResult,
+  StemName,
+  TrackFields,
+  WaveformColorMode,
+  WaveformCustomColors,
+} from "../types";
 
 const COLLISION_LABEL: Record<PlannedMove["collision"], string> = {
   none: "OK",
@@ -23,6 +36,7 @@ const COLLISION_LABEL: Record<PlannedMove["collision"], string> = {
  * for why a preview-only Library pass ships first. */
 export function LibraryWorkspace() {
   const jobs = useAppStore((s) => s.jobs);
+  const zoomPercent = useAppStore((s) => s.zoomPercent);
   const downloads = useMemo(
     () => jobs.filter((j) => j.state === "complete" && j.destination),
     [jobs],
@@ -33,44 +47,97 @@ export function LibraryWorkspace() {
   const [destinationRoot, setDestinationRoot] = useState("");
   const [plan, setPlan] = useState<PlannedMove[] | null>(null);
   const [duplicates, setDuplicates] = useState<string[][]>([]);
+  const [crates, setCrates] = useState<Crate[]>([]);
+
+  useEffect(() => {
+    api.listCrates().then(setCrates);
+  }, []);
+
+  async function createCrateAndAdd(name: string, trackPath: string) {
+    const created = await api.createCrate(name);
+    await api.addTrackToCrate(created.id, trackPath);
+    setCrates((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+  }
 
   const audioRef = useRef<HTMLAudioElement>(null);
-  const [playingId, setPlayingId] = useState<string | null>(null);
+  // `selectedId` (which track is loaded into the shared <audio> element) is
+  // deliberately separate from `isPlaying` (whether it's audibly playing) —
+  // they used to be the same flag, which meant pausing fully deselected a
+  // track and lost its playhead/cue context. Keeping them apart lets a
+  // paused track stay "loaded": its playhead stays visible and its cues
+  // stay jump-to-able without reloading.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  // The shared <audio> element's play/pause state can change from several
+  // call sites (togglePlay, jumpToCue, native `ended`) — mirror it into
+  // React state from the element itself rather than setting `isPlaying` by
+  // hand at every call site, so it can't drift out of sync.
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const onPlay = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+    audio.addEventListener("play", onPlay);
+    audio.addEventListener("pause", onPause);
+    audio.addEventListener("ended", onPause);
+    return () => {
+      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("ended", onPause);
+    };
+  }, []);
 
   function togglePlay(job: Job) {
     if (!job.destination) return;
     const audio = audioRef.current;
     if (!audio) return;
-    if (playingId === job.id) {
-      audio.pause();
-      setPlayingId(null);
-      return;
+    if (selectedId === job.id) {
+      if (audio.paused) void audio.play();
+      else audio.pause();
+    } else {
+      audio.src = convertFileSrc(job.destination);
+      setSelectedId(job.id);
+      void audio.play();
     }
-    audio.src = convertFileSrc(job.destination);
-    void audio.play();
-    setPlayingId(job.id);
   }
 
-  /** Click-to-seek on a waveform: switch to this track (if it isn't already
-   * playing) and jump straight to `seekSeconds`. */
-  function playFrom(job: Job, seekSeconds: number) {
+  /** Jump to (and audibly confirm) a saved cue: loads+plays the track if it
+   * isn't already selected, otherwise just retargets playback in place.
+   * Distinct from `seekPreview` below — this one is allowed to start audio
+   * because the user asked to hear a specific cue, not just to mark a
+   * position. */
+  function jumpToCue(job: Job, seconds: number) {
     if (!job.destination) return;
     const audio = audioRef.current;
     if (!audio) return;
 
-    if (playingId !== job.id) {
+    if (selectedId !== job.id) {
       audio.src = convertFileSrc(job.destination);
-      setPlayingId(job.id);
+      setSelectedId(job.id);
       const onLoaded = () => {
-        audio.currentTime = seekSeconds;
+        audio.currentTime = seconds;
         audio.removeEventListener("loadedmetadata", onLoaded);
       };
       audio.addEventListener("loadedmetadata", onLoaded);
       void audio.play();
     } else {
-      audio.currentTime = seekSeconds;
+      audio.currentTime = seconds;
       if (audio.paused) void audio.play();
     }
+  }
+
+  /** Waveform click: repositions the loaded track's playback if this row
+   * is already selected, but — unlike `jumpToCue` — never starts playback
+   * on its own. A row that isn't selected yet has no shared-audio-element
+   * effect at all; its own local cursor (in DownloadRow) still updates for
+   * visual feedback and cue-setting purposes independent of this, which is
+   * what lets you set every cue on a track without ever pressing play. */
+  function seekPreview(job: Job, seconds: number) {
+    if (!job.destination) return;
+    const audio = audioRef.current;
+    if (!audio || selectedId !== job.id) return;
+    audio.currentTime = seconds;
   }
 
   async function scanFolder() {
@@ -119,15 +186,20 @@ export function LibraryWorkspace() {
   }
 
   return (
-    <div className="flex-1 min-w-0 overflow-y-auto p-6">
-      <h1 className="font-display font-semibold text-xl">Library</h1>
-      <p className="text-sm text-parchment-dim mt-1 max-w-lg">
-        Scan a folder, preview how a folder template would organize it, and check for duplicate
-        files by checksum — nothing moves until you apply it manually.
-      </p>
+    <div className="flex-1 min-w-0 overflow-y-auto p-6" style={{ zoom: `${zoomPercent}%` }}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="font-display font-semibold text-xl">Library</h1>
+          <p className="text-sm text-parchment-dim mt-1 max-w-lg">
+            Scan a folder, preview how a folder template would organize it, and check for
+            duplicate files by checksum — nothing moves until you apply it manually.
+          </p>
+        </div>
+        <ZoomControl />
+      </div>
 
       {downloads.length > 0 && (
-        <div className="mt-6 max-w-2xl">
+        <div className="mt-6 w-full max-w-[1600px]">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold">Downloads</h2>
             <span className="text-xs text-parchment-dim">{downloads.length} track(s)</span>
@@ -140,14 +212,19 @@ export function LibraryWorkspace() {
               <DownloadRow
                 key={job.id}
                 job={job}
-                playing={playingId === job.id}
+                selected={selectedId === job.id}
+                playing={isPlaying && selectedId === job.id}
                 onTogglePlay={() => togglePlay(job)}
-                onSeek={(seconds) => playFrom(job, seconds)}
+                onSeekPreview={(seconds) => seekPreview(job, seconds)}
+                onJumpToCue={(seconds) => jumpToCue(job, seconds)}
                 audioRef={audioRef}
+                crates={crates}
+                onAddToCrate={(crateId) => job.destination && void api.addTrackToCrate(crateId, job.destination)}
+                onCreateCrateAndAdd={(name) => job.destination && void createCrateAndAdd(name, job.destination)}
               />
             ))}
           </ul>
-          <audio ref={audioRef} onEnded={() => setPlayingId(null)} className="hidden" />
+          <audio ref={audioRef} className="hidden" />
         </div>
       )}
 
@@ -163,7 +240,7 @@ export function LibraryWorkspace() {
       </div>
 
       {tracks.length > 0 && (
-        <div className="mt-6 max-w-2xl space-y-4">
+        <div className="mt-6 w-full max-w-[1600px] space-y-4">
           <div className="flex flex-wrap gap-3">
             <Field label="Folder template">
               <input
@@ -246,24 +323,632 @@ function formatTime(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-function DownloadRow({
+/** 8 pads/track — the pad count both Rekordbox and Serato use, so every
+ * cue set here maps onto a real pad on export instead of getting dropped
+ * or renumbered. Colors are fixed per slot (not user-chosen) to keep v1
+ * simple; they're still carried through to Rekordbox/Serato on export so
+ * pads show up color-coded there too. */
+const CUE_COLORS = [
+  "#ff3b30",
+  "#ff9500",
+  "#ffcc00",
+  "#34c759",
+  "#00c7be",
+  "#0a84ff",
+  "#af52de",
+  "#ff2d92",
+];
+
+function AddToCrateButton({
+  crates,
+  onAdd,
+  onCreateAndAdd,
+}: {
+  crates: Crate[];
+  onAdd: (crateId: string) => void;
+  onCreateAndAdd: (name: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClickOutside = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [open]);
+
+  return (
+    <div ref={boxRef} className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="px-3 py-1.5 rounded-full text-xs font-medium border border-charcoal-700 text-parchment-dim hover:text-parchment hover:border-teal/60 transition-colors"
+      >
+        + Crate
+      </button>
+      {open && (
+        <div className="absolute right-0 z-10 mt-1 w-48 rounded-lg border border-charcoal-700 bg-charcoal-800 shadow-xl py-1">
+          {crates.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => {
+                onAdd(c.id);
+                setOpen(false);
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs text-parchment hover:bg-charcoal-700 truncate"
+            >
+              {c.name}
+            </button>
+          ))}
+          {crates.length > 0 && <div className="my-1 border-t border-charcoal-700" />}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const name = newName.trim();
+              if (!name) return;
+              onCreateAndAdd(name);
+              setNewName("");
+              setOpen(false);
+            }}
+            className="px-2 py-1"
+          >
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="New crate…"
+              className="w-full bg-charcoal-900 border border-charcoal-700 rounded px-2 py-1 text-xs text-parchment placeholder:text-parchment-dim/60 focus:outline-none focus:border-teal/60"
+            />
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Stacks the low/mid/high band PNGs (each transparent-background,
+ * rendered by the `generate_band_waveform` Rust command) with
+ * `mix-blend-mode: screen` on a black backing layer — additively combining
+ * the three colors the way a CDJ or Rekordbox/Serato waveform display
+ * does, so low-heavy sections read blue, high-heavy sections read orange,
+ * and full-spectrum hits read close to white. */
+/** Default per-band colors for each mode. "classic-blue" doesn't render
+ * through this component at all (see `ClassicWaveform`) — its entry here is
+ * unused, kept only so `MODE_COLORS` stays total over `WaveformColorMode`. */
+// RGB mode's fills carry an alpha component (the last hex pair) rather
+// than pure saturated primaries — `recolor()`'s canvas fillStyle accepts
+// 8-digit #rrggbbaa directly, so this is a one-line way to get the soft,
+// glassy overlap look real DJ waveform displays use instead of a harsh
+// pure-additive blend. Muted cyan/pink/mint chosen to match that
+// reference look rather than literal red/green/blue.
+const MODE_COLORS: Record<WaveformColorMode, WaveformCustomColors> = {
+  rgb: { low: "#3ea6ffd9", mid: "#5be8b0d9", high: "#ff7ecbd9" },
+  "three-band": { low: "#0a84ff", mid: "#ff9500", high: "#5ac8fa" },
+  "classic-blue": { low: "#0a84ff", mid: "#0a84ff", high: "#0a84ff" },
+};
+
+/** Renders the low/mid/high band waveform PNGs (rendered by the backend as
+ * neutral white-on-transparent shapes) recolored client-side to the active
+ * mode's palette. RGB Mode overlays all three full-height with additive
+ * `screen` blending (true red/green/blue → rich overlap colors). 3-Band
+ * Mode instead lays them out as non-overlapping horizontal thirds — solid,
+ * individually legible strips rather than a blended glow. */
+function ColoredWaveform({
+  bands,
+  mode,
+  customColors,
+  className = "",
+}: {
+  bands: BandWaveform | null;
+  mode: WaveformColorMode;
+  customColors: WaveformCustomColors | null;
+  className?: string;
+}) {
+  const colors = customColors ?? MODE_COLORS[mode];
+  const [recolored, setRecolored] = useState<WaveformCustomColors | null>(null);
+
+  useEffect(() => {
+    if (!bands) {
+      setRecolored(null);
+      return;
+    }
+    let cancelled = false;
+    Promise.all([recolor(bands.low, colors.low), recolor(bands.mid, colors.mid), recolor(bands.high, colors.high)])
+      .then(([low, mid, high]) => {
+        if (!cancelled) setRecolored({ low, mid, high });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [bands, colors.low, colors.mid, colors.high]);
+
+  if (!recolored) return <div className={`bg-black ${className}`} />;
+
+  if (mode === "three-band") {
+    return (
+      <div className={`bg-black ${className}`}>
+        <img src={recolored.low} alt="" draggable={false} className="absolute inset-x-0 top-0 h-1/3 w-full object-fill pointer-events-none" />
+        <img src={recolored.mid} alt="" draggable={false} className="absolute inset-x-0 top-1/3 h-1/3 w-full object-fill pointer-events-none" />
+        <img src={recolored.high} alt="" draggable={false} className="absolute inset-x-0 top-2/3 h-1/3 w-full object-fill pointer-events-none" />
+      </div>
+    );
+  }
+
+  return (
+    <div className={`bg-black ${className}`}>
+      <img src={recolored.low} alt="" draggable={false} className="absolute inset-0 w-full h-full object-fill mix-blend-screen pointer-events-none" />
+      <img src={recolored.mid} alt="" draggable={false} className="absolute inset-0 w-full h-full object-fill mix-blend-screen pointer-events-none" />
+      <img src={recolored.high} alt="" draggable={false} className="absolute inset-0 w-full h-full object-fill mix-blend-screen pointer-events-none" />
+    </div>
+  );
+}
+
+/** "Classic Blue" mode: the plain pre-existing single-band amplitude
+ * waveform (no frequency-color info), recolored to blue for naming
+ * consistency — its backend render (`generate_waveform`) actually produces
+ * a yellow-green shape by default. */
+function ClassicWaveform({ src, className = "" }: { src: string | null; className?: string }) {
+  const [blue, setBlue] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!src) {
+      setBlue(null);
+      return;
+    }
+    let cancelled = false;
+    recolor(src, "#0a84ff")
+      .then((uri) => {
+        if (!cancelled) setBlue(uri);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [src]);
+
+  return (
+    <div className={`bg-black ${className}`}>
+      {blue && <img src={blue} alt="" draggable={false} className="absolute inset-0 w-full h-full object-fill pointer-events-none" />}
+    </div>
+  );
+}
+
+const WAVEFORM_MODE_LABEL: Record<WaveformColorMode, string> = {
+  rgb: "RGB",
+  "three-band": "3-Band",
+  "classic-blue": "Classic Blue",
+};
+
+const STEM_LABELS: Record<StemName, string> = {
+  vocals: "Vocals",
+  drums: "Drums",
+  bass: "Bass",
+  other: "Other",
+};
+const ALL_STEMS: StemName[] = ["vocals", "drums", "bass", "other"];
+
+/** Real ML-based stem separation (isolated vocals/drums/bass/other via a
+ * Demucs model) — distinct from the low/mid/high EQ-band waveform above,
+ * which is a visual aid only and can't produce isolated stems. A checkbox
+ * picker lets the user choose what to keep, but the note under the
+ * checkboxes is honest that Demucs always computes all four together —
+ * unchecking a stem only skips saving it, not the processing cost. */
+function StemDownloadButton({ job }: { job: Job }) {
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<Set<StemName>>(new Set(ALL_STEMS));
+  const [status, setStatus] = useState<"idle" | "downloading-model" | "splitting" | "done" | "error">("idle");
+  const [percent, setPercent] = useState(0);
+  const [result, setResult] = useState<StemDownloadResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClickOutside = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [open]);
+
+  useEffect(() => {
+    if (!job.destination) return;
+    const destination = job.destination;
+    const unlistenModel = onStemModelDownloadProgress(({ downloaded, total }) => {
+      setStatus("downloading-model");
+      setPercent(total > 0 ? (downloaded / total) * 100 : 0);
+    });
+    const unlistenSplit = onStemSplitProgress((p) => {
+      if (p.path !== destination) return;
+      setStatus("splitting");
+      setPercent(p.percent);
+    });
+    return () => {
+      void unlistenModel.then((f) => f());
+      void unlistenSplit.then((f) => f());
+    };
+  }, [job.destination]);
+
+  function toggle(stem: StemName) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(stem)) next.delete(stem);
+      else next.add(stem);
+      return next;
+    });
+  }
+
+  async function startDownload() {
+    if (!job.destination || selected.size === 0) return;
+    setStatus("downloading-model");
+    setPercent(0);
+    setError(null);
+    try {
+      const outcome = await api.separateTrackStems(job.destination, Array.from(selected));
+      setResult(outcome);
+      setStatus("done");
+    } catch (e) {
+      setError(String(e));
+      setStatus("error");
+    }
+  }
+
+  const busy = status === "downloading-model" || status === "splitting";
+
+  return (
+    <div ref={boxRef} className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        disabled={busy}
+        className="px-2.5 py-1 rounded-full text-[11px] font-medium border border-charcoal-700 text-parchment-dim hover:text-parchment hover:border-teal/60 transition-colors disabled:opacity-40"
+      >
+        {busy ? `${status === "downloading-model" ? "Downloading model" : "Splitting"}… ${Math.round(percent)}%` : "Download Stems"}
+      </button>
+      {open && (
+        <div className="absolute right-0 z-10 mt-1 w-56 rounded-lg border border-charcoal-700 bg-charcoal-800 shadow-xl p-3">
+          <p className="text-[11px] font-semibold text-parchment-dim uppercase tracking-wide">Stems to save</p>
+          <div className="mt-2 space-y-1.5">
+            {ALL_STEMS.map((stem) => (
+              <label key={stem} className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selected.has(stem)}
+                  onChange={() => toggle(stem)}
+                  className="accent-signal"
+                />
+                {STEM_LABELS[stem]}
+              </label>
+            ))}
+          </div>
+          <p className="mt-2 text-[10px] text-parchment-dim/70">
+            Separation always processes the full track — unchecking a stem just skips saving it,
+            not the processing time. First use downloads a ~200MB model; separation itself can
+            take a couple minutes.
+          </p>
+          {error && <p className="mt-2 text-[10px] text-red-400">{error}</p>}
+          {status === "done" && result ? (
+            <div className="mt-2 space-y-1">
+              {ALL_STEMS.filter((s) => result[s]).map((stem) => (
+                <button
+                  key={stem}
+                  onClick={() => result[stem] && void revealItemInDir(result[stem]!)}
+                  className="block w-full text-left text-xs text-signal hover:text-signal-dim"
+                >
+                  Reveal {STEM_LABELS[stem]} in Finder
+                </button>
+              ))}
+            </div>
+          ) : (
+            <button
+              onClick={() => void startDownload()}
+              disabled={busy || selected.size === 0}
+              className="mt-3 w-full px-3 py-1.5 rounded-md text-xs font-semibold bg-signal text-charcoal-950 hover:bg-signal-dim disabled:opacity-30 transition-colors"
+            >
+              {busy ? "Working…" : "Download"}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Full-screen detail view for one track: a large colored (low/mid/high
+ * band) waveform plus the same 8 hot-cue pads as the row, sized and
+ * hotkeyed (number keys 1-8) for actually dropping/checking cues rather
+ * than just eyeballing them in a 40px-tall strip. Reuses the row's cue
+ * state and cursor rather than owning a second copy, so cues set here
+ * show up in the row immediately and vice versa. */
+function TrackDetailModal({
   job,
+  selected,
   playing,
+  position,
+  durationSec,
+  cues,
+  cueBySlot,
+  onClose,
   onTogglePlay,
   onSeek,
-  audioRef,
+  onJumpToCue,
+  onSetCue,
+  onDeleteCue,
 }: {
   job: Job;
+  selected: boolean;
   playing: boolean;
+  position: number;
+  durationSec: number;
+  cues: CuePoint[];
+  cueBySlot: Map<number, CuePoint>;
+  onClose: () => void;
   onTogglePlay: () => void;
   onSeek: (seconds: number) => void;
-  audioRef: React.RefObject<HTMLAudioElement | null>;
+  onJumpToCue: (seconds: number) => void;
+  onSetCue: (slot: number) => void;
+  onDeleteCue: (slot: number, e: React.MouseEvent) => void;
 }) {
+  const settings = useAppStore((s) => s.settings);
+  const saveSettings = useAppStore((s) => s.saveSettings);
+  const waveformColorMode = settings?.waveform_color_mode ?? "three-band";
+  const customColors = settings?.waveform_custom_colors ?? null;
+
+  const [bands, setBands] = useState<BandWaveform | null>(null);
+  const [monoWaveform, setMonoWaveform] = useState<string | null>(null);
+  const [hoverFraction, setHoverFraction] = useState<number | null>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  // Only one of the two waveform renders is ever fetched — whichever the
+  // active mode needs — so switching to Classic Blue never pays for the
+  // band-split ffmpeg render, and RGB/3-Band never pay for the plain one.
+  useEffect(() => {
+    if (!job.destination || waveformColorMode === "classic-blue") return;
+    let cancelled = false;
+    api
+      .generateBandWaveform(job.destination)
+      .then((b) => {
+        if (!cancelled) setBands(b);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [job.destination, waveformColorMode]);
+
+  useEffect(() => {
+    if (!job.destination || waveformColorMode !== "classic-blue") return;
+    let cancelled = false;
+    api
+      .generateWaveform(job.destination)
+      .then((uri) => {
+        if (!cancelled) setMonoWaveform(uri);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [job.destination, waveformColorMode]);
+
+  // Number keys 1-8 jump to (or, if empty, drop) the matching hot cue;
+  // space toggles playback; escape closes. This is the "hotkeys" surface
+  // the enlarged view exists for — the small row waveform is too cramped
+  // to comfortably rehearse a cue layout against.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.target instanceof HTMLInputElement) return;
+      if (e.key >= "1" && e.key <= "8") {
+        const slot = Number(e.key) - 1;
+        const cue = cueBySlot.get(slot);
+        if (cue) onJumpToCue(cue.position_ms / 1000);
+        else if (durationSec > 0) onSetCue(slot);
+        e.preventDefault();
+      } else if (e.key === " ") {
+        onTogglePlay();
+        e.preventDefault();
+      } else if (e.key === "Escape") {
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [cueBySlot, durationSec, onJumpToCue, onSetCue, onTogglePlay, onClose]);
+
+  function fractionFromEvent(e: React.MouseEvent): number {
+    const box = boxRef.current;
+    if (!box) return 0;
+    const rect = box.getBoundingClientRect();
+    return Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+  }
+
+  const playedFraction = durationSec > 0 ? Math.min(1, position / durationSec) : 0;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-charcoal-950/90 backdrop-blur-sm flex items-center justify-center p-8" onClick={onClose}>
+      <div
+        className="w-full max-w-4xl rounded-xl border border-charcoal-700 bg-charcoal-900 p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-base font-semibold truncate">{job.title ?? job.destination}</p>
+            {job.artist && <p className="text-sm text-parchment-dim truncate">{job.artist}</p>}
+          </div>
+          <button
+            onClick={onClose}
+            className="shrink-0 w-8 h-8 rounded-full border border-charcoal-700 text-parchment-dim hover:text-parchment hover:border-teal/60 flex items-center justify-center transition-colors"
+          >
+            <CloseIcon className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="mt-4 flex items-center gap-3">
+          <button
+            onClick={onTogglePlay}
+            className="shrink-0 w-10 h-10 rounded-full bg-signal text-charcoal-950 flex items-center justify-center hover:bg-signal-dim transition-colors"
+          >
+            {playing ? <PauseIcon className="w-5 h-5" /> : <PlayIcon className="w-5 h-5 ml-0.5" />}
+          </button>
+          <span className="text-xs font-mono text-parchment-dim">
+            {formatTime(position)} / {formatTime(durationSec)}
+          </span>
+          <span className="text-xs text-parchment-dim/60 flex-1">
+            Click the waveform to set a position — the track doesn't need to be playing. Press 1-8 to jump to or drop a hot cue.
+          </span>
+          <div className="flex items-center gap-1 shrink-0 rounded-full border border-charcoal-700 p-0.5">
+            {(Object.keys(WAVEFORM_MODE_LABEL) as WaveformColorMode[]).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => settings && void saveSettings({ ...settings, waveform_color_mode: mode })}
+                className={[
+                  "px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors",
+                  waveformColorMode === mode
+                    ? "bg-charcoal-700 text-signal"
+                    : "text-parchment-dim hover:text-parchment",
+                ].join(" ")}
+              >
+                {WAVEFORM_MODE_LABEL[mode]}
+              </button>
+            ))}
+          </div>
+          <StemDownloadButton job={job} />
+        </div>
+
+        <div
+          ref={boxRef}
+          onClick={(e) => durationSec > 0 && onSeek(fractionFromEvent(e) * durationSec)}
+          onMouseMove={(e) => setHoverFraction(fractionFromEvent(e))}
+          onMouseLeave={() => setHoverFraction(null)}
+          className="relative mt-4 h-56 rounded-lg overflow-hidden cursor-pointer select-none"
+        >
+          {waveformColorMode === "classic-blue" ? (
+            <ClassicWaveform src={monoWaveform} className="absolute inset-0 w-full h-full" />
+          ) : (
+            <ColoredWaveform
+              bands={bands}
+              mode={waveformColorMode}
+              customColors={customColors}
+              className="absolute inset-0 w-full h-full"
+            />
+          )}
+          {((waveformColorMode === "classic-blue" && !monoWaveform) ||
+            (waveformColorMode !== "classic-blue" && !bands)) && (
+            <div className="absolute inset-0 animate-pulse bg-charcoal-800/50 flex items-center justify-center">
+              <span className="text-xs text-parchment-dim/70">Rendering waveform…</span>
+            </div>
+          )}
+
+          {durationSec > 0 && (selected || position > 0) && (
+            <div
+              className="absolute top-0 bottom-0 w-px bg-signal pointer-events-none"
+              style={{ left: `${playedFraction * 100}%` }}
+            >
+              <span className="absolute -top-0.5 left-1.5 text-[11px] font-mono text-signal whitespace-nowrap bg-charcoal-950/70 px-1 rounded">
+                {formatTime(position)}
+              </span>
+            </div>
+          )}
+
+          {hoverFraction !== null && durationSec > 0 && (
+            <div
+              className="absolute top-0 bottom-0 w-px bg-parchment/60 pointer-events-none"
+              style={{ left: `${hoverFraction * 100}%` }}
+            >
+              <span className="absolute bottom-1 left-1.5 text-[11px] font-mono text-parchment/80 whitespace-nowrap bg-charcoal-950/70 px-1 rounded">
+                {formatTime(hoverFraction * durationSec)}
+              </span>
+            </div>
+          )}
+
+          {durationSec > 0 &&
+            cues.map((cue) => (
+              <div
+                key={cue.slot}
+                className="absolute top-0 bottom-0 w-0.5 pointer-events-none"
+                style={{
+                  left: `${(cue.position_ms / 1000 / durationSec) * 100}%`,
+                  backgroundColor: cue.color ?? CUE_COLORS[cue.slot],
+                }}
+              />
+            ))}
+        </div>
+
+        <div className="flex items-center gap-2 mt-4">
+          {Array.from({ length: 8 }, (_, slot) => {
+            const cue = cueBySlot.get(slot);
+            const color = cue ? (cue.color ?? CUE_COLORS[slot]) : undefined;
+            return (
+              <button
+                key={slot}
+                onClick={() => (cue ? onJumpToCue(cue.position_ms / 1000) : durationSec > 0 && onSetCue(slot))}
+                disabled={!cue && durationSec === 0}
+                title={
+                  cue
+                    ? `Jump to cue ${slot + 1} (${formatTime(cue.position_ms / 1000)})`
+                    : `Drop cue ${slot + 1} at ${formatTime(position)}`
+                }
+                className={[
+                  "group relative flex-1 h-12 rounded-lg text-sm font-mono font-semibold flex items-center justify-center transition-colors disabled:opacity-30 disabled:cursor-not-allowed",
+                  cue ? "text-charcoal-950" : "border border-charcoal-700 text-parchment-dim hover:border-teal/60 hover:text-parchment",
+                ].join(" ")}
+                style={cue ? { backgroundColor: color } : undefined}
+              >
+                {slot + 1}
+                {cue && (
+                  <span
+                    onClick={(e) => onDeleteCue(slot, e)}
+                    className="absolute -top-1.5 -right-1.5 hidden group-hover:flex w-5 h-5 rounded-full bg-charcoal-900 border border-charcoal-700 text-parchment-dim hover:text-parchment items-center justify-center text-[11px] leading-none"
+                  >
+                    ×
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DownloadRow({
+  job,
+  selected,
+  playing,
+  onTogglePlay,
+  onSeekPreview,
+  onJumpToCue,
+  audioRef,
+  crates,
+  onAddToCrate,
+  onCreateCrateAndAdd,
+}: {
+  job: Job;
+  selected: boolean;
+  playing: boolean;
+  onTogglePlay: () => void;
+  onSeekPreview: (seconds: number) => void;
+  onJumpToCue: (seconds: number) => void;
+  audioRef: React.RefObject<HTMLAudioElement | null>;
+  crates: Crate[];
+  onAddToCrate: (crateId: string) => void;
+  onCreateCrateAndAdd: (name: string) => void;
+}) {
+  const settings = useAppStore((s) => s.settings);
   const [waveform, setWaveform] = useState<string | null>(null);
   const [waveformFailed, setWaveformFailed] = useState(false);
   const { bpm, key, durationSec, analyzing } = useTrackAnalysis(job.destination);
-  const [currentTime, setCurrentTime] = useState(0);
+  // The cue-setting cursor: while `selected`, this tracks the shared
+  // <audio> element's real position (so it moves during playback and
+  // after a seek); while not selected, it's purely local, moved only by
+  // clicking the waveform — which is what lets every cue on a track be
+  // set without ever loading it into the shared player.
+  const [position, setPosition] = useState(0);
   const [hoverFraction, setHoverFraction] = useState<number | null>(null);
+  const [cues, setCues] = useState<CuePoint[]>([]);
+  const [expanded, setExpanded] = useState(false);
   const waveformBoxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -282,16 +967,63 @@ function DownloadRow({
     };
   }, [job.destination]);
 
-  // Track playback position for the playhead — only while this row is the
-  // one actually playing.
+  useEffect(() => {
+    if (!job.destination) return;
+    let cancelled = false;
+    const destination = job.destination;
+    api.listCuePoints(destination).then(async (result) => {
+      if (cancelled) return;
+      setCues(result);
+      // Only worth asking the cloud for state when this track has none
+      // locally yet — the Rust side re-checks this itself too, but
+      // skipping the call entirely here avoids a pointless round trip on
+      // every track that already has local cues (the common case).
+      if (settings?.sync_enabled && result.length === 0) {
+        const applied = await api.pullTrackSync(destination).catch(() => false);
+        if (!cancelled && applied) {
+          const refreshed = await api.listCuePoints(destination).catch(() => result);
+          if (!cancelled) setCues(refreshed);
+        }
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [job.destination, settings?.sync_enabled]);
+
+  const cueBySlot = new Map(cues.map((c) => [c.slot, c]));
+
+  async function setCueAtCurrentPosition(slot: number) {
+    if (!job.destination) return;
+    const cue = await api.setCuePoint(job.destination, slot, Math.round(position * 1000));
+    setCues((prev) => [...prev.filter((c) => c.slot !== slot), cue]);
+    if (settings?.sync_enabled) void api.pushTrackSync(job.destination).catch(() => {});
+  }
+
+  async function deleteCue(slot: number, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!job.destination) return;
+    await api.deleteCuePoint(job.destination, slot);
+    setCues((prev) => prev.filter((c) => c.slot !== slot));
+    if (settings?.sync_enabled) void api.pushTrackSync(job.destination).catch(() => {});
+  }
+
+  // Keep `position` glued to the shared <audio> element's real time
+  // whenever this row is the loaded one — including while paused, so a
+  // manual seek (or the cue-jump landing point) is reflected immediately
+  // rather than waiting for the next `timeupdate` tick during playback.
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio || !playing) return;
-    const onTimeUpdate = () => setCurrentTime(audio.currentTime);
-    audio.addEventListener("timeupdate", onTimeUpdate);
-    setCurrentTime(audio.currentTime);
-    return () => audio.removeEventListener("timeupdate", onTimeUpdate);
-  }, [audioRef, playing]);
+    if (!audio || !selected) return;
+    const sync = () => setPosition(audio.currentTime);
+    audio.addEventListener("timeupdate", sync);
+    audio.addEventListener("seeked", sync);
+    sync();
+    return () => {
+      audio.removeEventListener("timeupdate", sync);
+      audio.removeEventListener("seeked", sync);
+    };
+  }, [audioRef, selected]);
 
   function fractionFromEvent(e: React.MouseEvent): number {
     const box = waveformBoxRef.current;
@@ -300,7 +1032,15 @@ function DownloadRow({
     return Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
   }
 
-  const playedFraction = durationSec > 0 ? Math.min(1, currentTime / durationSec) : 0;
+  /** Set the cue-setting cursor and, if this track happens to be the one
+   * loaded into the shared player, retarget playback to match — but never
+   * start playback on its own. */
+  function handleSeek(seconds: number) {
+    setPosition(seconds);
+    onSeekPreview(seconds);
+  }
+
+  const playedFraction = durationSec > 0 ? Math.min(1, position / durationSec) : 0;
 
   return (
     <li className="rounded-lg border border-charcoal-700 bg-charcoal-800/40 px-4 py-2.5">
@@ -312,13 +1052,17 @@ function DownloadRow({
           >
             {playing ? <PauseIcon className="w-4 h-4" /> : <PlayIcon className="w-4 h-4 ml-0.5" />}
           </button>
-          <div className="min-w-0">
-            <p className="text-sm font-medium truncate">
+          <button
+            onClick={() => setExpanded(true)}
+            className="min-w-0 text-left group"
+            title="Open enlarged waveform"
+          >
+            <p className="text-sm font-medium truncate group-hover:text-teal transition-colors">
               {job.title ?? job.destination}
               {job.artist && <span className="text-parchment-dim font-normal"> — {job.artist}</span>}
             </p>
             <p className="text-[11px] font-mono text-parchment-dim truncate">{job.destination}</p>
-          </div>
+          </button>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {analyzing && (
@@ -335,6 +1079,14 @@ function DownloadRow({
             </span>
           )}
           <button
+            onClick={() => setExpanded(true)}
+            className="w-7 h-7 rounded-full border border-charcoal-700 text-parchment-dim hover:text-parchment hover:border-teal/60 flex items-center justify-center transition-colors"
+            title="Open enlarged waveform"
+          >
+            <ExpandIcon className="w-3.5 h-3.5" />
+          </button>
+          <AddToCrateButton crates={crates} onAdd={onAddToCrate} onCreateAndAdd={onCreateCrateAndAdd} />
+          <button
             onClick={() => job.destination && void revealItemInDir(job.destination)}
             className="px-3 py-1.5 rounded-full text-xs font-medium border border-charcoal-700 text-parchment-dim hover:text-parchment hover:border-teal/60 transition-colors"
           >
@@ -345,7 +1097,7 @@ function DownloadRow({
 
       <div
         ref={waveformBoxRef}
-        onClick={(e) => durationSec > 0 && onSeek(fractionFromEvent(e) * durationSec)}
+        onClick={(e) => durationSec > 0 && handleSeek(fractionFromEvent(e) * durationSec)}
         onMouseMove={(e) => setHoverFraction(fractionFromEvent(e))}
         onMouseLeave={() => setHoverFraction(null)}
         className="relative mt-2 h-10 rounded-md overflow-hidden bg-charcoal-900/60 cursor-pointer select-none"
@@ -356,14 +1108,16 @@ function DownloadRow({
           <div className="w-full h-full animate-pulse bg-charcoal-800/50" />
         )}
 
-        {/* Playhead: current playback position */}
-        {playing && durationSec > 0 && (
+        {/* Cursor: current playback position while loaded, or the last
+            clicked cue-setting point while not — visible either way so a
+            cue can be placed and eyeballed without pressing play. */}
+        {durationSec > 0 && (
           <div
             className="absolute top-0 bottom-0 w-px bg-signal pointer-events-none"
             style={{ left: `${playedFraction * 100}%` }}
           >
             <span className="absolute -top-0.5 left-1 text-[10px] font-mono text-signal whitespace-nowrap">
-              {formatTime(currentTime)}
+              {formatTime(position)}
             </span>
           </div>
         )}
@@ -379,7 +1133,77 @@ function DownloadRow({
             </span>
           </div>
         )}
+
+        {/* Cue markers: colored ticks at each set pad's position */}
+        {durationSec > 0 &&
+          cues.map((cue) => (
+            <div
+              key={cue.slot}
+              className="absolute top-0 bottom-0 w-0.5 pointer-events-none"
+              style={{
+                left: `${(cue.position_ms / 1000 / durationSec) * 100}%`,
+                backgroundColor: cue.color ?? CUE_COLORS[cue.slot],
+              }}
+            />
+          ))}
       </div>
+
+      {/* Hot cue pads: click an empty pad anytime to drop a cue at the
+          current cursor position (no need to be playing — click the
+          waveform above first to move the cursor, then drop the pad);
+          click a set pad anytime to jump there and start playback; hover
+          a set pad to reveal a small delete affordance. */}
+      <div className="flex items-center gap-1 mt-1.5">
+        {Array.from({ length: 8 }, (_, slot) => {
+          const cue = cueBySlot.get(slot);
+          const color = cue ? (cue.color ?? CUE_COLORS[slot]) : undefined;
+          return (
+            <button
+              key={slot}
+              onClick={() => (cue ? onJumpToCue(cue.position_ms / 1000) : durationSec > 0 && void setCueAtCurrentPosition(slot))}
+              disabled={!cue && durationSec === 0}
+              title={
+                cue
+                  ? `Jump to cue ${slot + 1} (${formatTime(cue.position_ms / 1000)})`
+                  : `Drop cue ${slot + 1} at ${formatTime(position)}`
+              }
+              className={[
+                "group relative w-6 h-6 rounded text-[10px] font-mono font-semibold flex items-center justify-center transition-colors disabled:opacity-30 disabled:cursor-not-allowed",
+                cue ? "text-charcoal-950" : "border border-charcoal-700 text-parchment-dim hover:border-teal/60 hover:text-parchment",
+              ].join(" ")}
+              style={cue ? { backgroundColor: color } : undefined}
+            >
+              {slot + 1}
+              {cue && (
+                <span
+                  onClick={(e) => void deleteCue(slot, e)}
+                  className="absolute -top-1.5 -right-1.5 hidden group-hover:flex w-3.5 h-3.5 rounded-full bg-charcoal-900 border border-charcoal-700 text-parchment-dim hover:text-parchment items-center justify-center text-[9px] leading-none"
+                >
+                  ×
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {expanded && (
+        <TrackDetailModal
+          job={job}
+          selected={selected}
+          playing={playing}
+          position={position}
+          durationSec={durationSec}
+          cues={cues}
+          cueBySlot={cueBySlot}
+          onClose={() => setExpanded(false)}
+          onTogglePlay={onTogglePlay}
+          onSeek={handleSeek}
+          onJumpToCue={onJumpToCue}
+          onSetCue={(slot) => void setCueAtCurrentPosition(slot)}
+          onDeleteCue={(slot, e) => void deleteCue(slot, e)}
+        />
+      )}
     </li>
   );
 }

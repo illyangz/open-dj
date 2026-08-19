@@ -3,8 +3,11 @@ import { useAppStore } from "../store/useAppStore";
 import type { WorkspaceId } from "../types";
 import { Tour } from "./Tour";
 import { UpdateBanner } from "./UpdateBanner";
+import { UsernameWidget } from "./UsernameWidget";
 import {
   AutomationIcon,
+  CommunityIcon,
+  CratesIcon,
   LibraryIcon,
   QueueIcon,
   RepairIcon,
@@ -19,6 +22,8 @@ const NAV: { id: WorkspaceId; label: string; icon: (p: { className?: string }) =
   { id: "repair", label: "Repair", icon: RepairIcon },
   { id: "library", label: "Library", icon: LibraryIcon },
   { id: "sort", label: "Sort", icon: SortIcon },
+  { id: "crates", label: "Crates", icon: CratesIcon },
+  { id: "community", label: "Community", icon: CommunityIcon },
   { id: "automations", label: "Automations", icon: AutomationIcon },
   { id: "settings", label: "Settings", icon: SettingsIcon },
 ];
@@ -70,6 +75,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             );
           })}
         </ul>
+
+        <div className="px-3 py-3 border-t border-charcoal-700">
+          <UsernameWidget compact />
+        </div>
 
         <div className="px-5 py-4 space-y-2">
           <button

@@ -53,6 +53,12 @@ const STEPS: TourStep[] = [
     body: "Groups your whole library by Camelot key and BPM for harmonic mixing, with one-click export to Rekordbox.",
   },
   {
+    workspace: "crates",
+    tourId: "nav-crates",
+    title: "Crates",
+    body: "Build named, ordered track lists and export them to Rekordbox or Serato — hot cues included. Add tracks from Library's \"+ Crate\" button.",
+  },
+  {
     workspace: "automations",
     tourId: "nav-automations",
     title: "Automations",

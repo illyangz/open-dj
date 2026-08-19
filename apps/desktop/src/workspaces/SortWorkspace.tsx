@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { useTrackAnalysis, type TrackAnalysisState } from "../lib/useTrackAnalysis";
 import { useAppStore } from "../store/useAppStore";
 import { PlayIcon, PauseIcon } from "../components/icons";
+import { ZoomControl } from "../components/ZoomControl";
 import type { Job } from "../types";
 
 /** Camelot notation is "<1-12><A|B>" — A is the minor (inner) wheel, B the
@@ -34,6 +35,7 @@ function formatTime(seconds: number): string {
  * the baken toolkit, reimplemented natively rather than depending on it. */
 export function SortWorkspace() {
   const jobs = useAppStore((s) => s.jobs);
+  const zoomPercent = useAppStore((s) => s.zoomPercent);
   const downloads = useMemo(
     () => jobs.filter((j) => j.state === "complete" && j.destination),
     [jobs],
@@ -93,7 +95,7 @@ export function SortWorkspace() {
   }, [downloads, analysisById]);
 
   return (
-    <div className="flex-1 min-w-0 overflow-y-auto p-6">
+    <div className="flex-1 min-w-0 overflow-y-auto p-6" style={{ zoom: `${zoomPercent}%` }}>
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="font-display font-semibold text-xl">Sort</h1>
@@ -102,7 +104,10 @@ export function SortWorkspace() {
             set key-by-key, or export for Rekordbox.
           </p>
         </div>
-        <ExportButtons downloads={downloads} analysisById={analysisById} />
+        <div className="flex items-center gap-3">
+          <ZoomControl />
+          <ExportButtons downloads={downloads} analysisById={analysisById} />
+        </div>
       </div>
 
       {/* Hidden workers: resolve each track's BPM/key/duration and lift it
@@ -119,7 +124,7 @@ export function SortWorkspace() {
           completed.
         </div>
       ) : (
-        <div className="mt-6 max-w-3xl space-y-6">
+        <div className="mt-6 w-full max-w-[1600px] space-y-6">
           {groups.sortedKeys.map((key) => (
             <div key={key}>
               <h2 className="text-xs font-mono uppercase tracking-wide text-signal/80 mb-1.5">

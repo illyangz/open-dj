@@ -120,6 +120,14 @@ export interface MutationJournal {
   created_at: string;
 }
 
+export type WaveformColorMode = "rgb" | "three-band" | "classic-blue";
+
+export interface WaveformCustomColors {
+  low: string;
+  mid: string;
+  high: string;
+}
+
 export interface Settings {
   download_root: string;
   folder_template: string;
@@ -130,6 +138,11 @@ export interface Settings {
   lawful_use_acknowledged: boolean;
   youtube_cookies_browser: string;
   youtube_cookies_file: string;
+  waveform_color_mode: WaveformColorMode;
+  waveform_custom_colors: WaveformCustomColors | null;
+  device_secret: string;
+  username: string;
+  sync_enabled: boolean;
 }
 
 export interface TrackFields {
@@ -177,11 +190,99 @@ export interface ScTrack {
   transcode_url: string | null;
 }
 
+/** A hot cue pad (slot 0-7, matching Rekordbox's and Serato's own pad
+ * count), keyed by the track's own file path — see crates/core/src/db.rs
+ * for why that's the identity instead of a job id. */
+export interface CuePoint {
+  id: string;
+  track_path: string;
+  slot: number;
+  position_ms: number;
+  label: string | null;
+  color: string | null;
+  created_at: string;
+}
+
+/** Three separate transparent-background PNGs (low/mid/high frequency
+ * bands) meant to be stacked as layered `<img>` elements — see the Rust
+ * `generate_band_waveform` command for why compositing happens client-side
+ * instead of server-side. */
+export interface BandWaveform {
+  low: string;
+  mid: string;
+  high: string;
+}
+
+export type StemName = "vocals" | "drums" | "bass" | "other";
+
+/** Only the stems the caller asked to keep come back populated — the rest
+ * were computed (Demucs always separates all four together) but deleted
+ * server-side to match the user's picker selection. */
+export interface StemDownloadResult {
+  vocals: string | null;
+  drums: string | null;
+  bass: string | null;
+  other: string | null;
+}
+
+export interface StemModelDownloadProgress {
+  downloaded: number;
+  total: number;
+}
+
+export interface StemSplitProgress {
+  path: string;
+  stage: string;
+  percent: number;
+}
+
+export type SharedItemKind = "crate" | "song" | "post";
+
+export interface CommunityTrack {
+  title: string;
+  artist: string | null;
+  bpm: number | null;
+  musical_key: string | null;
+  source_url: string | null;
+}
+
+export interface CommunityItem {
+  id: string;
+  kind: SharedItemKind;
+  title: string | null;
+  caption: string | null;
+  tracks: CommunityTrack[];
+  upvote_count: number;
+  created_at: number;
+  author_username: string | null;
+}
+
+export interface CommunityUpvoteResult {
+  upvoted: boolean;
+  upvote_count: number;
+}
+
+export interface CommunityComment {
+  id: string;
+  text: string;
+  created_at: number;
+  author_username: string | null;
+}
+
+export interface Crate {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export type WorkspaceId =
   | "queue"
   | "soundcloud"
   | "repair"
   | "library"
   | "sort"
+  | "crates"
+  | "community"
   | "automations"
   | "settings";

@@ -1,6 +1,9 @@
 mod commands;
+mod community_commands;
 mod jobs;
 mod state;
+mod stem_commands;
+mod sync_commands;
 
 use state::AppState;
 use tauri::Manager;
@@ -65,6 +68,7 @@ pub fn run() {
                     .set_cookies_file(Some(settings.youtube_cookies_file.clone()));
             }
             app.manage(app_state);
+            stem_commands::register_progress_bridge(handle.clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -75,8 +79,20 @@ pub fn run() {
             commands::cancel_job,
             commands::retry_job,
             commands::delete_job,
+            commands::set_cue_point,
+            commands::delete_cue_point,
+            commands::list_cue_points,
+            commands::create_crate,
+            commands::rename_crate,
+            commands::delete_crate,
+            commands::list_crates,
+            commands::add_track_to_crate,
+            commands::remove_track_from_crate,
+            commands::list_crate_tracks,
+            commands::reorder_crate_tracks,
             commands::scan_file,
             commands::generate_waveform,
+            commands::generate_band_waveform,
             commands::analyze_track,
             commands::preview_replacement,
             commands::apply_replacement,
@@ -88,12 +104,30 @@ pub fn run() {
             commands::find_duplicate_tracks,
             commands::scan_library_folder,
             commands::write_text_file,
+            commands::write_binary_file,
             commands::get_settings,
             commands::update_settings,
             commands::check_system_tools,
             commands::fetch_soundcloud_likes,
             commands::download_soundcloud_track,
             commands::export_diagnostics,
+            sync_commands::ensure_device_identity,
+            sync_commands::import_device_identity,
+            sync_commands::push_track_sync_state,
+            sync_commands::pull_track_sync_state,
+            sync_commands::push_preferences,
+            sync_commands::pull_preferences,
+            stem_commands::separate_track_stems,
+            community_commands::share_crate,
+            community_commands::share_song,
+            community_commands::share_post,
+            community_commands::list_community_feed,
+            community_commands::toggle_community_upvote,
+            community_commands::list_my_upvotes,
+            community_commands::list_community_mentions,
+            community_commands::add_community_comment,
+            community_commands::list_community_comments,
+            community_commands::search_community_usernames,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

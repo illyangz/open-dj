@@ -216,6 +216,65 @@ pub struct Settings {
     /// browser-cookie extraction has proven flaky.
     #[serde(default)]
     pub youtube_cookies_file: String,
+    /// "rgb" | "three-band" | "classic-blue" — which color scheme the
+    /// enlarged per-track waveform uses. Defaults to "three-band" to match
+    /// the scheme's original fixed-color behavior before this became
+    /// selectable.
+    #[serde(default = "default_waveform_color_mode")]
+    pub waveform_color_mode: String,
+    /// Per-band hex overrides for RGB/three-band modes; `None` uses the
+    /// mode's own defaults. Classic Blue is deliberately not customizable
+    /// here — it's meant to stay a fixed, simple reference view.
+    #[serde(default)]
+    pub waveform_custom_colors: Option<WaveformCustomColors>,
+    /// Random per-device bearer credential for the anonymous cloud sync
+    /// backend — empty until lazily generated (see `ensure_device_identity`
+    /// in the desktop app). Never a password; the only "recovery" is the
+    /// user copying this value to another device themselves.
+    #[serde(default)]
+    pub device_secret: String,
+    /// Pure display label attached to the sync identity, empty = unset.
+    #[serde(default)]
+    pub username: String,
+    /// Off by default, mirroring `analytics_opt_in`'s opt-in-only stance —
+    /// nothing is sent to the sync backend until the user turns this on.
+    #[serde(default)]
+    pub sync_enabled: bool,
+}
+
+fn default_waveform_color_mode() -> String {
+    "three-band".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WaveformCustomColors {
+    pub low: String,
+    pub mid: String,
+    pub high: String,
+}
+
+/// A hot cue: one of up to 8 pads (`slot` 0-7) on a track, matching the pad
+/// count both Rekordbox and Serato use. Keyed by `track_path` — see
+/// `db.rs` for why that's the identity instead of a job id.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CuePoint {
+    pub id: Uuid,
+    pub track_path: String,
+    pub slot: u8,
+    pub position_ms: u64,
+    pub label: Option<String>,
+    /// Hex color (e.g. `"#c7f000"`) — both Rekordbox and Serato color-code
+    /// hot cue pads, and preserve that color on import/export.
+    pub color: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Crate {
+    pub id: Uuid,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 impl Default for Settings {
@@ -230,6 +289,11 @@ impl Default for Settings {
             lawful_use_acknowledged: false,
             youtube_cookies_browser: String::new(),
             youtube_cookies_file: String::new(),
+            waveform_color_mode: default_waveform_color_mode(),
+            waveform_custom_colors: None,
+            device_secret: String::new(),
+            username: String::new(),
+            sync_enabled: false,
         }
     }
 }

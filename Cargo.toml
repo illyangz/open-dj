@@ -8,6 +8,8 @@ members = [
     "crates/providers",
     "crates/organization",
     "crates/keyfinder-bridge",
+    "crates/sync",
+    "crates/stems",
 ]
 
 [workspace.package]

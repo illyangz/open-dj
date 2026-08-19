@@ -12,6 +12,11 @@ export function SettingsWorkspace() {
   const providers = useAppStore((s) => s.providers);
   const [tools, setTools] = useState<SystemToolsStatus | null>(null);
   const [toolsLoading, setToolsLoading] = useState(true);
+  const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
+  const [revealing, setRevealing] = useState(false);
+  const [importValue, setImportValue] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -38,6 +43,35 @@ export function SettingsWorkspace() {
       filters: [{ name: "Cookies", extensions: ["txt"] }],
     });
     if (typeof file === "string") await update({ youtube_cookies_file: file });
+  }
+
+  async function revealRecoveryKey() {
+    setSyncError(null);
+    setRevealing(true);
+    try {
+      setRevealedSecret(await api.ensureDeviceIdentity());
+    } catch (e) {
+      setSyncError(String(e));
+    } finally {
+      setRevealing(false);
+    }
+  }
+
+  async function importRecoveryKey() {
+    const secret = importValue.trim();
+    if (!secret) return;
+    setSyncError(null);
+    setImporting(true);
+    try {
+      await api.importDeviceIdentity(secret);
+      await useAppStore.getState().refreshSettings();
+      setImportValue("");
+      setRevealedSecret(null);
+    } catch (e) {
+      setSyncError(String(e));
+    } finally {
+      setImporting(false);
+    }
   }
 
   return (
@@ -176,6 +210,64 @@ export function SettingsWorkspace() {
         </FieldRow>
         <p className="text-xs text-parchment-dim mt-1">
           Off by default (FR-061). OpenDJ never uploads audio files or file paths anywhere.
+        </p>
+      </Section>
+
+      <Section title="Sync">
+        <FieldRow label="Sync BPM, key, cues &amp; preferences">
+          <Toggle checked={settings.sync_enabled} onChange={(v) => update({ sync_enabled: v })} />
+        </FieldRow>
+        <FieldRow label="Display name">
+          <input
+            value={settings.username}
+            onChange={(e) => update({ username: e.target.value })}
+            placeholder="Anonymous"
+            className="rounded-lg bg-charcoal-800/60 border border-charcoal-700 px-3 py-1.5 text-sm w-48"
+          />
+        </FieldRow>
+        <FieldRow label="Recovery key">
+          {revealedSecret ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono text-parchment-dim">{revealedSecret}</span>
+              <button
+                onClick={() => navigator.clipboard.writeText(revealedSecret)}
+                className="text-xs text-signal hover:text-signal-dim"
+              >
+                Copy
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={revealRecoveryKey}
+              disabled={revealing}
+              className="text-xs text-signal hover:text-signal-dim disabled:opacity-40"
+            >
+              {revealing ? "Generating…" : "Reveal…"}
+            </button>
+          )}
+        </FieldRow>
+        <FieldRow label="Use on this device">
+          <div className="flex items-center gap-2">
+            <input
+              value={importValue}
+              onChange={(e) => setImportValue(e.target.value)}
+              placeholder="Paste recovery key…"
+              className="rounded-lg bg-charcoal-800/60 border border-charcoal-700 px-3 py-1.5 text-xs font-mono w-48"
+            />
+            <button
+              onClick={importRecoveryKey}
+              disabled={importing || !importValue.trim()}
+              className="text-xs text-signal hover:text-signal-dim disabled:opacity-40"
+            >
+              {importing ? "Importing…" : "Import"}
+            </button>
+          </div>
+        </FieldRow>
+        {syncError && <p className="text-xs text-red-400">{syncError}</p>}
+        <p className="text-xs text-parchment-dim mt-1">
+          Off by default. No account, no sign-up — your recovery key is a random secret, not a
+          password. Anyone who has it can use your identity, so treat it like one; there's no
+          account recovery if you lose it. Set a display name if you want one, or stay anonymous.
         </p>
       </Section>
 

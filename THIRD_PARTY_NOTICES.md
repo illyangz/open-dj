@@ -17,6 +17,17 @@ CI, and published alongside each release.
 | [reqwest](https://github.com/seanmonstar/reqwest) | MIT / Apache-2.0 | HTTP client for provider adapters |
 | [Space Grotesk](https://fonts.google.com/specimen/Space+Grotesk) | OFL-1.1 | Display typeface |
 | [IBM Plex Sans / Mono](https://github.com/IBM/plex) | OFL-1.1 | Body and monospace typefaces |
+| [stem-splitter-core](https://github.com/gentij/stem-splitter-core) | MIT / Apache-2.0 | ONNX Runtime-based Demucs (htdemucs) inference for real stem separation |
+
+## Stem separation model
+
+Stem separation (`crates/stems`) does not bundle model weights in the app installer. The first
+time a user runs it, `stem-splitter-core` downloads and SHA-256-verifies a ~200MB ONNX export of
+the Hybrid Transformer Demucs (htdemucs) model directly from Hugging Face
+(`gentij/htdemucs-ort`) — the same "external tool, fetched on demand rather than shipped" pattern
+already used for yt-dlp/ffmpeg. That model repository does not carry an explicit license tag as
+of this writing; the underlying Demucs research code and pretrained weights (Meta/FAIR) are
+released under MIT. If that changes or is clarified, update this note accordingly.
 
 ## FFmpeg
 

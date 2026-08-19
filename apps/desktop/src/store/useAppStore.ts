@@ -2,12 +2,26 @@ import { create } from "zustand";
 import { api, onQueueUpdated } from "../lib/api";
 import type { Job, ProviderInfo, Settings, WorkspaceId } from "../types";
 
+const ZOOM_STORAGE_KEY = "opendj.zoomPercent";
+
+function readStoredZoom(): number {
+  const raw = Number(localStorage.getItem(ZOOM_STORAGE_KEY));
+  return raw >= 70 && raw <= 150 ? raw : 100;
+}
+
 interface AppStore {
   workspace: WorkspaceId;
   setWorkspace: (w: WorkspaceId) => void;
 
   tourOpen: boolean;
   setTourOpen: (open: boolean) => void;
+
+  /** Shared across Library/Sort/Crates — these are the dense list workspaces
+   * where a user might want more or less density than responsive width
+   * alone gives. Persisted directly to localStorage rather than pulling in
+   * Zustand's `persist` middleware for one field. */
+  zoomPercent: number;
+  setZoom: (percent: number) => void;
 
   jobs: Job[];
   selectedJobId: string | null;
@@ -23,6 +37,7 @@ interface AppStore {
   settings: Settings | null;
   refreshSettings: () => Promise<void>;
   saveSettings: (settings: Settings) => Promise<void>;
+  setUsername: (username: string) => Promise<void>;
 
   initialized: boolean;
   init: () => Promise<void>;
@@ -34,6 +49,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   tourOpen: false,
   setTourOpen: (open) => set({ tourOpen: open }),
+
+  zoomPercent: readStoredZoom(),
+  setZoom: (percent) => {
+    const clamped = Math.min(150, Math.max(70, percent));
+    localStorage.setItem(ZOOM_STORAGE_KEY, String(clamped));
+    set({ zoomPercent: clamped });
+  },
 
   jobs: [],
   selectedJobId: null,
@@ -84,7 +106,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
   saveSettings: async (settings: Settings) => {
     await api.updateSettings(settings);
     set({ settings });
+    if (settings.sync_enabled) void api.pushPreferences().catch(() => {});
     await get().refreshProviders();
+  },
+  // A username is a public community-identity concern, not a "sync my
+  // personal data" one — it always pushes to the backend regardless of
+  // `sync_enabled`, unlike every other preference field. Without this, a
+  // user with sync off could set a username locally and never see it show
+  // up on their own posts.
+  setUsername: async (username: string) => {
+    const current = get().settings;
+    if (!current) return;
+    const settings = { ...current, username };
+    await api.updateSettings(settings);
+    set({ settings });
+    await api.pushPreferences();
   },
 
   initialized: false,
@@ -92,6 +128,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (get().initialized) return;
     set({ initialized: true });
     await Promise.all([get().refreshJobs(), get().refreshProviders(), get().refreshSettings()]);
+    if (get().settings?.sync_enabled) {
+      // Best-effort: a fresh install/offline pull failing shouldn't block
+      // startup, and the local settings we already loaded are a perfectly
+      // usable fallback.
+      api
+        .pullPreferences()
+        .then(() => get().refreshSettings())
+        .catch(() => {});
+    }
     await onQueueUpdated((job) => {
       get().patchJob(job);
     });

@@ -13,6 +13,10 @@ apps/desktop/dist-ssr/
 # Tauri
 apps/desktop/src-tauri/gen/
 
+# Convex — regenerated locally by `npx convex dev`/`convex deploy` from
+# backend/convex/schema.ts and the function files; not meant to be committed.
+backend/convex/_generated/
+
 # Logs
 *.log
 npm-debug.log*

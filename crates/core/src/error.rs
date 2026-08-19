@@ -10,6 +10,8 @@ pub enum CoreError {
     InvalidTransition(String, &'static str),
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("crate {0} not found")]
+    CrateNotFound(uuid::Uuid),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

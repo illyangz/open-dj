@@ -1,6 +1,6 @@
 use crate::jobs;
 use crate::state::AppState;
-use opendj_core::{InputKind, Job, MutationJournal, Settings};
+use opendj_core::{Crate, CuePoint, InputKind, Job, MutationJournal, Settings};
 use opendj_file_ops::MutationRecord;
 use opendj_metadata::AudioProbe;
 use opendj_organization::{PlannedMove, TrackFields};
@@ -123,6 +123,123 @@ pub async fn retry_job(app: AppHandle, state: State<'_, AppState>, id: Uuid) -> 
 #[tauri::command]
 pub async fn delete_job(state: State<'_, AppState>, id: Uuid) -> CmdResult<()> {
     state.store.delete_job(id).map_err(|e| e.to_string())
+}
+
+/// Hot cues (up to 8 pads/track, matching Rekordbox's and Serato's own pad
+/// count) and crates — see crates/core/src/db.rs for why both are keyed by
+/// the track's file path rather than a job id.
+#[tauri::command]
+pub async fn set_cue_point(
+    state: State<'_, AppState>,
+    track_path: String,
+    slot: u8,
+    position_ms: u64,
+    label: Option<String>,
+    color: Option<String>,
+) -> CmdResult<CuePoint> {
+    state
+        .store
+        .set_cue_point(
+            &track_path,
+            slot,
+            position_ms,
+            label.as_deref(),
+            color.as_deref(),
+        )
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_cue_point(
+    state: State<'_, AppState>,
+    track_path: String,
+    slot: u8,
+) -> CmdResult<()> {
+    state
+        .store
+        .delete_cue_point(&track_path, slot)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn list_cue_points(
+    state: State<'_, AppState>,
+    track_path: String,
+) -> CmdResult<Vec<CuePoint>> {
+    state
+        .store
+        .list_cue_points(&track_path)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn create_crate(state: State<'_, AppState>, name: String) -> CmdResult<Crate> {
+    state.store.create_crate(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn rename_crate(state: State<'_, AppState>, id: Uuid, name: String) -> CmdResult<Crate> {
+    state
+        .store
+        .rename_crate(id, &name)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_crate(state: State<'_, AppState>, id: Uuid) -> CmdResult<()> {
+    state.store.delete_crate(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn list_crates(state: State<'_, AppState>) -> CmdResult<Vec<Crate>> {
+    state.store.list_crates().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn add_track_to_crate(
+    state: State<'_, AppState>,
+    crate_id: Uuid,
+    track_path: String,
+) -> CmdResult<()> {
+    state
+        .store
+        .add_track_to_crate(crate_id, &track_path)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn remove_track_from_crate(
+    state: State<'_, AppState>,
+    crate_id: Uuid,
+    track_path: String,
+) -> CmdResult<()> {
+    state
+        .store
+        .remove_track_from_crate(crate_id, &track_path)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn list_crate_tracks(
+    state: State<'_, AppState>,
+    crate_id: Uuid,
+) -> CmdResult<Vec<String>> {
+    state
+        .store
+        .list_crate_tracks(crate_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn reorder_crate_tracks(
+    state: State<'_, AppState>,
+    crate_id: Uuid,
+    ordered_paths: Vec<String>,
+) -> CmdResult<()> {
+    state
+        .store
+        .reorder_crate_tracks(crate_id, &ordered_paths)
+        .map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -270,6 +387,139 @@ pub async fn generate_waveform(
         "data:image/png;base64,{}",
         base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
     ))
+}
+
+#[derive(Debug, Serialize)]
+pub struct BandWaveform {
+    pub low: String,
+    pub mid: String,
+    pub high: String,
+}
+
+/// A 3-band waveform (low/mid/high) for the enlarged track detail view,
+/// rendered as three separate white-on-transparent PNGs — neutral so the
+/// frontend can recolor each band precisely (per the user's selected
+/// waveform color mode) via a canvas `source-in` composite, and layer them
+/// as stacked `<img>` elements so the browser's own alpha compositing does
+/// the blending. This sidesteps a real ffmpeg quirk: piping the three bands
+/// through ffmpeg's own `blend` filter to composite them server-side
+/// produced an opaque white background instead of the expected transparent
+/// one (blend appears to not preserve alpha the way `showwavespic` alone
+/// does), so compositing happens in the frontend instead, where
+/// alpha-transparent PNG layering is standard, well-tested platform
+/// behavior.
+#[tauri::command]
+pub async fn generate_band_waveform(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> CmdResult<BandWaveform> {
+    use sha2::{Digest, Sha256};
+
+    let cache_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("waveforms");
+    tokio::fs::create_dir_all(&cache_dir)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Cache filenames are versioned (`-v3`) rather than just `{hash}-low.png`
+    // because what's baked into these PNGs has changed twice now (color,
+    // then gain — see below) but the cache key is only a hash of the file
+    // *path* — without bumping the version each time, a track already
+    // viewed under an older scheme would keep serving stale PNGs from disk
+    // forever.
+    let mut hasher = Sha256::new();
+    hasher.update(path.as_bytes());
+    let digest = hasher.finalize();
+    let low_path = cache_dir.join(format!("{:x}-low-v3.png", digest));
+    let mid_path = cache_dir.join(format!("{:x}-mid-v3.png", digest));
+    let high_path = cache_dir.join(format!("{:x}-high-v3.png", digest));
+
+    if !low_path.exists() || !mid_path.exists() || !high_path.exists() {
+        let ffmpeg = opendj_providers::yt_dlp_bin::find_ffmpeg()
+            .ok_or("ffmpeg not found. Install it with: brew install ffmpeg".to_string())?;
+
+        let _permit = state
+            .analysis_semaphore
+            .acquire()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // Bands roughly match a DJ mixer's 3-band EQ split: low <250Hz,
+        // mid 250Hz-4kHz (bandpass centered at 1kHz with a wide enough Q
+        // to cover that range), high >4kHz. Rendered as opaque white shapes
+        // on a transparent background (not baked-in colors) — the frontend
+        // recolors them per the user's selected waveform color mode via a
+        // canvas `source-in` composite, which needs a neutral, alpha-exact
+        // source to recolor precisely.
+        //
+        // Per-band gain compensation (mid ×3, high ×8) matters a lot more
+        // than it looks: most music's energy is concentrated in bass, so a
+        // highpass->showwavespic render with no gain applied comes out as a
+        // near-flat, barely-visible line next to the low band — not because
+        // anything's broken, but because that band's raw peak amplitude
+        // really is a small fraction of full scale. `dynaudnorm` was tried
+        // first and barely moved it (its frame-adaptive normalization
+        // doesn't push a consistently-quiet band toward full scale the way
+        // a flat multiplier does); a fixed gain per band, tuned against a
+        // bass-heavy real track until the high band was clearly visible,
+        // works far better here since we're deliberately going for visual
+        // legibility over any kind of loudness accuracy.
+        let filter = "[0:a]asplit=3[a1][a2][a3];\
+             [a1]lowpass=f=250,aformat=channel_layouts=mono,showwavespic=s=1200x260:colors=#ffffff[low];\
+             [a2]bandpass=f=1000:width_type=h:w=3750,volume=3,aformat=channel_layouts=mono,showwavespic=s=1200x260:colors=#ffffff[mid];\
+             [a3]highpass=f=4000,volume=8,aformat=channel_layouts=mono,showwavespic=s=1200x260:colors=#ffffff[high]";
+
+        let output = tokio::process::Command::new(&ffmpeg)
+            .args([
+                "-y",
+                "-i",
+                &path,
+                "-filter_complex",
+                filter,
+                "-map",
+                "[low]",
+                "-frames:v",
+                "1",
+                &low_path.to_string_lossy(),
+                "-map",
+                "[mid]",
+                "-frames:v",
+                "1",
+                &mid_path.to_string_lossy(),
+                "-map",
+                "[high]",
+                "-frames:v",
+                "1",
+                &high_path.to_string_lossy(),
+            ])
+            .env("PATH", opendj_providers::yt_dlp_bin::augmented_path())
+            .output()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("ffmpeg band waveform render failed: {stderr}"));
+        }
+    }
+
+    async fn to_data_uri(path: &std::path::Path) -> CmdResult<String> {
+        let bytes = tokio::fs::read(path).await.map_err(|e| e.to_string())?;
+        Ok(format!(
+            "data:image/png;base64,{}",
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
+        ))
+    }
+
+    Ok(BandWaveform {
+        low: to_data_uri(&low_path).await?,
+        mid: to_data_uri(&mid_path).await?,
+        high: to_data_uri(&high_path).await?,
+    })
 }
 
 #[derive(Debug, Serialize)]
@@ -449,6 +699,16 @@ pub async fn scan_library_folder(directory: String) -> CmdResult<Vec<String>> {
 /// diagnostics export).
 #[tauri::command]
 pub async fn write_text_file(path: String, content: String) -> CmdResult<()> {
+    tokio::fs::write(&path, content)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Same as `write_text_file` but for binary output (e.g. a Serato `.crate`
+/// file) — the frontend builds the byte layout itself and just needs it
+/// placed on disk at a user-chosen path.
+#[tauri::command]
+pub async fn write_binary_file(path: String, content: Vec<u8>) -> CmdResult<()> {
     tokio::fs::write(&path, content)
         .await
         .map_err(|e| e.to_string())

@@ -84,6 +84,37 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             enabled         INTEGER NOT NULL DEFAULT 1,
             config_json     TEXT NOT NULL DEFAULT '{}'
         );
+
+        -- Hot cues and crates key off the track's own file path rather than
+        -- a job id: a track's DJ-relevant identity is the audio file on
+        -- disk, and not every track a user has necessarily arrived via a
+        -- download job (folder-scanned library tracks have no job at all).
+        CREATE TABLE IF NOT EXISTS cue_points (
+            id              TEXT PRIMARY KEY,
+            track_path      TEXT NOT NULL,
+            slot            INTEGER NOT NULL,
+            position_ms     INTEGER NOT NULL,
+            label           TEXT,
+            color           TEXT,
+            created_at      TEXT NOT NULL,
+            UNIQUE(track_path, slot)
+        );
+        CREATE INDEX IF NOT EXISTS idx_cue_points_track_path ON cue_points(track_path);
+
+        CREATE TABLE IF NOT EXISTS crates (
+            id              TEXT PRIMARY KEY,
+            name            TEXT NOT NULL,
+            created_at      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS crate_tracks (
+            crate_id        TEXT NOT NULL REFERENCES crates(id),
+            track_path      TEXT NOT NULL,
+            position         INTEGER NOT NULL,
+            PRIMARY KEY (crate_id, track_path)
+        );
+        CREATE INDEX IF NOT EXISTS idx_crate_tracks_crate_id ON crate_tracks(crate_id);
         "#,
     )
 }

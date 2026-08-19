@@ -14,7 +14,30 @@ permissions:
   contents: write
 
 jobs:
+  # Deploys the Convex sync backend ahead of the desktop build so the app
+  # gets built against a stable, already-live deployment rather than racing
+  # a backend deploy against the client baking a URL in. Runs once (not
+  # per-matrix-OS below) since a Convex deploy has no OS-specific step.
+  deploy-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - working-directory: backend
+        run: npm install
+      # CONVEX_DEPLOY_KEY is a repo secret (Convex dashboard → Settings →
+      # Deploy Keys), scoped only to this step, matching how
+      # TAURI_SIGNING_PRIVATE_KEY below is scoped only to the signing step
+      # that needs it.
+      - working-directory: backend
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+        run: npx convex deploy
+
   build:
+    needs: deploy-backend
     strategy:
       fail-fast: false
       matrix:
@@ -75,6 +98,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Not a secret — it's a deployment URL, not a credential (the
+          # actual credential is CONVEX_DEPLOY_KEY, used only in
+          # deploy-backend above). Set as a repo *variable* (Settings →
+          # Secrets and variables → Actions → Variables) from the Convex
+          # dashboard's Settings → URL & Deploy Key page. Baked into the
+          # binary at compile time via `option_env!("CONVEX_URL")` in
+          # `apps/desktop/src-tauri/src/state.rs`; falls back to a local
+          # `npx convex dev` URL when unset, so plain `cargo tauri dev`
+          # needs no configuration at all.
+          CONVEX_URL: ${{ vars.CONVEX_URL }}
         with:
           projectPath: apps/desktop
           args: ${{ matrix.args }}

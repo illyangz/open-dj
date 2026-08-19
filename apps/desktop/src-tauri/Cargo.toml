@@ -38,3 +38,5 @@ opendj-file-ops = { path = "../../../crates/file-ops" }
 opendj-metadata = { path = "../../../crates/metadata" }
 opendj-providers = { path = "../../../crates/providers" }
 opendj-organization = { path = "../../../crates/organization" }
+opendj-sync = { path = "../../../crates/sync" }
+opendj-stems = { path = "../../../crates/stems" }

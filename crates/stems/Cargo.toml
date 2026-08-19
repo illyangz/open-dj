@@ -1,0 +1,19 @@
+[package]
+name = "opendj-stems"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+# CPU-only on purpose: the upstream crate's default features pull in every
+# platform's GPU execution provider at once (cuda/coreml/directml/onednn/
+# xnnpack). This workspace has no existing precedent for per-platform Cargo
+# feature selection (see crates/keyfinder-bridge for the one existing
+# conditional-build case, which uses whole-crate CI exclusion + runtime
+# dlopen instead, not feature flags) — going CPU-only keeps this crate
+# building identically on every CI platform with no extra SDKs. Slower than
+# GPU inference, but correct everywhere; a platform-gated GPU feature can
+# be added later without touching this crate's public API.
+stem-splitter-core = { version = "1", default-features = false }

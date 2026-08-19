@@ -7,6 +7,8 @@ import { SoundcloudWorkspace } from "./workspaces/SoundcloudWorkspace";
 import { RepairWorkspace } from "./workspaces/RepairWorkspace";
 import { LibraryWorkspace } from "./workspaces/LibraryWorkspace";
 import { SortWorkspace } from "./workspaces/SortWorkspace";
+import { CratesWorkspace } from "./workspaces/CratesWorkspace";
+import { CommunityWorkspace } from "./workspaces/CommunityWorkspace";
 import { AutomationsWorkspace } from "./workspaces/AutomationsWorkspace";
 import { SettingsWorkspace } from "./workspaces/SettingsWorkspace";
 
@@ -16,6 +18,8 @@ const WORKSPACES = {
   repair: RepairWorkspace,
   library: LibraryWorkspace,
   sort: SortWorkspace,
+  crates: CratesWorkspace,
+  community: CommunityWorkspace,
   automations: AutomationsWorkspace,
   settings: SettingsWorkspace,
 };
