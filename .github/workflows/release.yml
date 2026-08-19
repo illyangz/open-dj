@@ -42,8 +42,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Apple Silicon only, not a universal (arm64+x86_64) binary: `ort`
+          # (pulled in by `opendj-stems` for on-device stem separation) only
+          # ships prebuilt ONNX Runtime binaries for aarch64-apple-darwin —
+          # there's no prebuilt x86_64-apple-darwin binary, so the Intel
+          # half of a universal build fails outright at link time. Building
+          # arm64-only sidesteps that; the trade-off is dropping support for
+          # Intel Macs (pre-November 2020) entirely, not just stems on them.
           - platform: macos-latest
-            args: "--target universal-apple-darwin"
+            args: "--target aarch64-apple-darwin"
           - platform: ubuntu-latest
             args: ""
           - platform: windows-latest
@@ -60,7 +67,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
       - uses: Swatinem/rust-cache@v2
 
       - uses: pnpm/action-setup@v4
