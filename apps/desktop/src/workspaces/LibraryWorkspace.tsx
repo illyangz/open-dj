@@ -462,21 +462,26 @@ function GradientWaveform({
     ctx.clearRect(0, 0, n, WAVEFORM_CANVAS_HEIGHT);
 
     if (mode === "rgb") {
-      const toDb = (v: number) => 10 * Math.log10(v + 1e-9);
-      const normChan = (arr: number[]) => {
-        const db = arr.map(toDb);
-        const mn = Math.min(...db);
-        const mx = Math.max(...db);
-        return db.map((v) => Math.pow((v - mn) / (mx - mn || 1), 0.8));
-      };
-      const nr = normChan(bands.low);
-      const ng = normChan(bands.mid);
-      const nb = normChan(bands.high);
+      // Color comes from each column's *relative* low/mid/high balance
+      // (normalized against that column's own max), not from how each
+      // channel compares to its behavior elsewhere in the track — a
+      // channel normalized against its own history collapses to "how loud
+      // is this channel right now vs. its own loudest moment," and on real
+      // music where bands largely rise and fall together with the overall
+      // mix, that reads as near-identical brightness in all three channels
+      // at once (i.e. white) regardless of actual spectral color. Per-column
+      // normalization instead asks "which band dominates *this instant*,"
+      // which genuinely varies moment to moment (a kick reads bass-heavy,
+      // a hat reads treble-heavy) even within a consistently loud track.
+      // Height is unaffected — it still comes from the overall peak
+      // envelope, independent of color.
       const peakMax = Math.max(...bands.peak) || 1;
       for (let x = 0; x < n; x++) {
-        const r = Math.round(nr[x] * 255);
-        const g = Math.round(ng[x] * 255);
-        const b = Math.round(nb[x] * 255);
+        const l = bands.low[x], m = bands.mid[x], h = bands.high[x];
+        const localMax = Math.max(l, m, h) || 1;
+        const r = Math.round(Math.pow(l / localMax, 0.8) * 255);
+        const g = Math.round(Math.pow(m / localMax, 0.8) * 255);
+        const b = Math.round(Math.pow(h / localMax, 0.8) * 255);
         ctx.fillStyle = `rgb(${r},${g},${b})`;
         const half = Math.pow(bands.peak[x] / peakMax, 0.6) * mid;
         ctx.fillRect(x, mid - half, 1, half * 2);
