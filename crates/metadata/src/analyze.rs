@@ -60,17 +60,18 @@ pub fn analyze_track(path: &Path) -> Result<TrackAnalysis> {
     })
 }
 
-struct DecodedAudio {
-    /// Downmixed to mono — what stratum-dsp expects.
-    mono_samples: Vec<f32>,
+pub(crate) struct DecodedAudio {
+    /// Downmixed to mono — what stratum-dsp (and the waveform-band FFT)
+    /// expects.
+    pub(crate) mono_samples: Vec<f32>,
     /// Original channel layout, interleaved — what libkeyfinder expects
     /// (it does its own, more careful channel reduction internally).
     interleaved_samples: Vec<f32>,
     channels: u32,
-    sample_rate: u32,
+    pub(crate) sample_rate: u32,
 }
 
-fn decode(path: &Path) -> Result<DecodedAudio> {
+pub(crate) fn decode(path: &Path) -> Result<DecodedAudio> {
     let src = std::fs::File::open(path).map_err(|e| MetadataError::Analysis(e.to_string()))?;
     let mss = MediaSourceStream::new(Box::new(src), Default::default());
 

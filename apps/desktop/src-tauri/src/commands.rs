@@ -389,31 +389,26 @@ pub async fn generate_waveform(
     ))
 }
 
-#[derive(Debug, Serialize)]
-pub struct BandWaveform {
-    pub low: String,
-    pub mid: String,
-    pub high: String,
-}
+/// Target column count for a band waveform — fixed regardless of track
+/// length, so a 10-minute track produces the same payload size as a
+/// 3-minute one (coarser time resolution per column, not more data).
+const WAVEFORM_TARGET_COLUMNS: usize = 2400;
 
-/// A 3-band waveform (low/mid/high) for the enlarged track detail view,
-/// rendered as three separate white-on-transparent PNGs — neutral so the
-/// frontend can recolor each band precisely (per the user's selected
-/// waveform color mode) via a canvas `source-in` composite, and layer them
-/// as stacked `<img>` elements so the browser's own alpha compositing does
-/// the blending. This sidesteps a real ffmpeg quirk: piping the three bands
-/// through ffmpeg's own `blend` filter to composite them server-side
-/// produced an opaque white background instead of the expected transparent
-/// one (blend appears to not preserve alpha the way `showwavespic` alone
-/// does), so compositing happens in the frontend instead, where
-/// alpha-transparent PNG layering is standard, well-tested platform
-/// behavior.
+/// A 3-band waveform (low/mid/high energy per column, plus an overall peak
+/// envelope) for the RGB/3-Band waveform views, computed from a real STFT
+/// (see `opendj_metadata::analyze_band_waveform`) rather than independently
+/// max-normalized ffmpeg renders — this is what lets a drop read loud/red
+/// and a breakdown read thin instead of every band looking equally loud
+/// everywhere. Raw, unnormalized energy sums are returned; normalization,
+/// dB compression, and color mapping all happen client-side (see
+/// `GradientWaveform` in the frontend) so visual tuning doesn't require
+/// re-running the FFT.
 #[tauri::command]
 pub async fn generate_band_waveform(
     app: AppHandle,
     state: State<'_, AppState>,
     path: String,
-) -> CmdResult<BandWaveform> {
+) -> CmdResult<opendj_metadata::BandWaveform> {
     use sha2::{Digest, Sha256};
 
     let cache_dir = app
@@ -425,101 +420,40 @@ pub async fn generate_band_waveform(
         .await
         .map_err(|e| e.to_string())?;
 
-    // Cache filenames are versioned (`-v3`) rather than just `{hash}-low.png`
-    // because what's baked into these PNGs has changed twice now (color,
-    // then gain — see below) but the cache key is only a hash of the file
-    // *path* — without bumping the version each time, a track already
-    // viewed under an older scheme would keep serving stale PNGs from disk
-    // forever.
+    // Cache filenames are versioned (`-v4`) because what's stored under this
+    // key has changed shape (PNG data URIs -> raw per-column energy arrays)
+    // but the cache key is only a hash of the file *path* — without bumping
+    // the version, a track already viewed under the old scheme would fail
+    // to deserialize against the new struct.
     let mut hasher = Sha256::new();
     hasher.update(path.as_bytes());
     let digest = hasher.finalize();
-    let low_path = cache_dir.join(format!("{:x}-low-v3.png", digest));
-    let mid_path = cache_dir.join(format!("{:x}-mid-v3.png", digest));
-    let high_path = cache_dir.join(format!("{:x}-high-v3.png", digest));
+    let cache_path = cache_dir.join(format!("{:x}-bands-v4.json", digest));
 
-    if !low_path.exists() || !mid_path.exists() || !high_path.exists() {
-        let ffmpeg = opendj_providers::yt_dlp_bin::find_ffmpeg()
-            .ok_or("ffmpeg not found. Install it with: brew install ffmpeg".to_string())?;
-
-        let _permit = state
-            .analysis_semaphore
-            .acquire()
-            .await
-            .map_err(|e| e.to_string())?;
-
-        // Bands roughly match a DJ mixer's 3-band EQ split: low <250Hz,
-        // mid 250Hz-4kHz (bandpass centered at 1kHz with a wide enough Q
-        // to cover that range), high >4kHz. Rendered as opaque white shapes
-        // on a transparent background (not baked-in colors) — the frontend
-        // recolors them per the user's selected waveform color mode via a
-        // canvas `source-in` composite, which needs a neutral, alpha-exact
-        // source to recolor precisely.
-        //
-        // Per-band gain compensation (mid ×3, high ×8) matters a lot more
-        // than it looks: most music's energy is concentrated in bass, so a
-        // highpass->showwavespic render with no gain applied comes out as a
-        // near-flat, barely-visible line next to the low band — not because
-        // anything's broken, but because that band's raw peak amplitude
-        // really is a small fraction of full scale. `dynaudnorm` was tried
-        // first and barely moved it (its frame-adaptive normalization
-        // doesn't push a consistently-quiet band toward full scale the way
-        // a flat multiplier does); a fixed gain per band, tuned against a
-        // bass-heavy real track until the high band was clearly visible,
-        // works far better here since we're deliberately going for visual
-        // legibility over any kind of loudness accuracy.
-        let filter = "[0:a]asplit=3[a1][a2][a3];\
-             [a1]lowpass=f=250,aformat=channel_layouts=mono,showwavespic=s=1200x260:colors=#ffffff[low];\
-             [a2]bandpass=f=1000:width_type=h:w=3750,volume=3,aformat=channel_layouts=mono,showwavespic=s=1200x260:colors=#ffffff[mid];\
-             [a3]highpass=f=4000,volume=8,aformat=channel_layouts=mono,showwavespic=s=1200x260:colors=#ffffff[high]";
-
-        let output = tokio::process::Command::new(&ffmpeg)
-            .args([
-                "-y",
-                "-i",
-                &path,
-                "-filter_complex",
-                filter,
-                "-map",
-                "[low]",
-                "-frames:v",
-                "1",
-                &low_path.to_string_lossy(),
-                "-map",
-                "[mid]",
-                "-frames:v",
-                "1",
-                &mid_path.to_string_lossy(),
-                "-map",
-                "[high]",
-                "-frames:v",
-                "1",
-                &high_path.to_string_lossy(),
-            ])
-            .env("PATH", opendj_providers::yt_dlp_bin::augmented_path())
-            .output()
-            .await
-            .map_err(|e| e.to_string())?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("ffmpeg band waveform render failed: {stderr}"));
+    if let Ok(bytes) = tokio::fs::read(&cache_path).await {
+        if let Ok(cached) = serde_json::from_slice(&bytes) {
+            return Ok(cached);
         }
     }
 
-    async fn to_data_uri(path: &std::path::Path) -> CmdResult<String> {
-        let bytes = tokio::fs::read(path).await.map_err(|e| e.to_string())?;
-        Ok(format!(
-            "data:image/png;base64,{}",
-            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
-        ))
+    let _permit = state
+        .analysis_semaphore
+        .acquire()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let bands = tokio::task::spawn_blocking(move || {
+        opendj_metadata::analyze_band_waveform(std::path::Path::new(&path), WAVEFORM_TARGET_COLUMNS)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    if let Ok(json) = serde_json::to_vec(&bands) {
+        let _ = tokio::fs::write(&cache_path, json).await;
     }
 
-    Ok(BandWaveform {
-        low: to_data_uri(&low_path).await?,
-        mid: to_data_uri(&mid_path).await?,
-        high: to_data_uri(&high_path).await?,
-    })
+    Ok(bands)
 }
 
 #[derive(Debug, Serialize)]

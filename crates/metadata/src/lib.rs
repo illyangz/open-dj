@@ -19,7 +19,9 @@ pub type Result<T> = std::result::Result<T, MetadataError>;
 
 mod analyze;
 mod keyfinder_bridge;
+mod waveform_bands;
 pub use analyze::{analyze_track, TrackAnalysis};
+pub use waveform_bands::{analyze_band_waveform, BandWaveform};
 
 /// FR-031: fields shown in the Repair inspector for a scanned local file.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

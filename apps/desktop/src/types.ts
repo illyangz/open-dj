@@ -203,14 +203,15 @@ export interface CuePoint {
   created_at: string;
 }
 
-/** Three separate transparent-background PNGs (low/mid/high frequency
- * bands) meant to be stacked as layered `<img>` elements — see the Rust
- * `generate_band_waveform` command for why compositing happens client-side
- * instead of server-side. */
+/** Per-column low/mid/high spectral energy (a real STFT, see the Rust
+ * `generate_band_waveform` command / `opendj_metadata::analyze_band_waveform`)
+ * plus an overall peak envelope — raw, unnormalized sums. Normalization, dB
+ * compression, and color mapping happen client-side in `GradientWaveform`. */
 export interface BandWaveform {
-  low: string;
-  mid: string;
-  high: string;
+  low: number[];
+  mid: number[];
+  high: number[];
+  peak: number[];
 }
 
 export type StemName = "vocals" | "drums" | "bass" | "other";

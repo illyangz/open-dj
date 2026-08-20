@@ -4,6 +4,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { api, onStemModelDownloadProgress, onStemSplitProgress } from "../lib/api";
 import { useTrackAnalysis } from "../lib/useTrackAnalysis";
+import { useTrackWaveform } from "../lib/useTrackWaveform";
 import { useAppStore } from "../store/useAppStore";
 import { PlayIcon, PauseIcon, ExpandIcon, CloseIcon } from "../components/icons";
 import { ZoomControl } from "../components/ZoomControl";
@@ -408,82 +409,102 @@ function AddToCrateButton({
   );
 }
 
-/** Stacks the low/mid/high band PNGs (each transparent-background,
- * rendered by the `generate_band_waveform` Rust command) with
- * `mix-blend-mode: screen` on a black backing layer — additively combining
- * the three colors the way a CDJ or Rekordbox/Serato waveform display
- * does, so low-heavy sections read blue, high-heavy sections read orange,
- * and full-spectrum hits read close to white. */
-/** Default per-band colors for each mode. "classic-blue" doesn't render
- * through this component at all (see `ClassicWaveform`) — its entry here is
- * unused, kept only so `MODE_COLORS` stays total over `WaveformColorMode`. */
-// RGB mode's fills carry an alpha component (the last hex pair) rather
-// than pure saturated primaries — `recolor()`'s canvas fillStyle accepts
-// 8-digit #rrggbbaa directly, so this is a one-line way to get the soft,
-// glassy overlap look real DJ waveform displays use instead of a harsh
-// pure-additive blend. Muted cyan/pink/mint chosen to match that
-// reference look rather than literal red/green/blue.
-const MODE_COLORS: Record<WaveformColorMode, WaveformCustomColors> = {
-  rgb: { low: "#3ea6ffd9", mid: "#5be8b0d9", high: "#ff7ecbd9" },
-  "three-band": { low: "#0a84ff", mid: "#ff9500", high: "#5ac8fa" },
+/** Default colors for 3-Band mode's stacked bands. "classic-blue" doesn't
+ * render through this component at all (see `ClassicWaveform`) — its entry
+ * here is unused, kept only so `MODE_COLORS` stays total over
+ * `WaveformColorMode`. RGB mode has no entry: it renders literal
+ * red/green/blue computed per column from real spectral energy, not a fixed
+ * palette. */
+const MODE_COLORS: Record<Exclude<WaveformColorMode, "rgb">, WaveformCustomColors> = {
+  "three-band": { low: "#0a84ff", mid: "#ff9f0a", high: "#ececec" },
   "classic-blue": { low: "#0a84ff", mid: "#0a84ff", high: "#0a84ff" },
 };
 
-/** Renders the low/mid/high band waveform PNGs (rendered by the backend as
- * neutral white-on-transparent shapes) recolored client-side to the active
- * mode's palette. RGB Mode overlays all three full-height with additive
- * `screen` blending (true red/green/blue → rich overlap colors). 3-Band
- * Mode instead lays them out as non-overlapping horizontal thirds — solid,
- * individually legible strips rather than a blended glow. */
-function ColoredWaveform({
+const WAVEFORM_CANVAS_HEIGHT = 260;
+
+/** Renders the low/mid/high per-column STFT energy (see `BandWaveform` /
+ * `generate_band_waveform`) straight to a canvas — real spectral analysis,
+ * not a pre-rendered image, so height and color both reflect true
+ * per-instant loudness rather than an independently max-normalized band.
+ *
+ * RGB Mode: one waveform, colored per column from the true low/mid/high
+ * energy ratio (dB-compressed, each channel independently normalized) —
+ * literal red/green/blue, the way Serato/Rekordbox color their waveforms.
+ * Height comes from the overall peak envelope, independent of color.
+ *
+ * 3-Band Mode: the same per-column energies drawn as three full-height
+ * bands stacked with additive `screen` blending, scaled against one shared
+ * max across all three bands (not normalized independently) so relative
+ * loudness between bands survives into the render. */
+function GradientWaveform({
   bands,
   mode,
   customColors,
   className = "",
 }: {
   bands: BandWaveform | null;
-  mode: WaveformColorMode;
+  mode: Exclude<WaveformColorMode, "classic-blue">;
   customColors: WaveformCustomColors | null;
   className?: string;
 }) {
-  const colors = customColors ?? MODE_COLORS[mode];
-  const [recolored, setRecolored] = useState<WaveformCustomColors | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (!bands) {
-      setRecolored(null);
+    const canvas = canvasRef.current;
+    if (!canvas || !bands || bands.low.length === 0) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const n = bands.low.length;
+    canvas.width = n;
+    canvas.height = WAVEFORM_CANVAS_HEIGHT;
+    const mid = WAVEFORM_CANVAS_HEIGHT / 2;
+    ctx.clearRect(0, 0, n, WAVEFORM_CANVAS_HEIGHT);
+
+    if (mode === "rgb") {
+      const toDb = (v: number) => 10 * Math.log10(v + 1e-9);
+      const normChan = (arr: number[]) => {
+        const db = arr.map(toDb);
+        const mn = Math.min(...db);
+        const mx = Math.max(...db);
+        return db.map((v) => Math.pow((v - mn) / (mx - mn || 1), 0.8));
+      };
+      const nr = normChan(bands.low);
+      const ng = normChan(bands.mid);
+      const nb = normChan(bands.high);
+      const peakMax = Math.max(...bands.peak) || 1;
+      for (let x = 0; x < n; x++) {
+        const r = Math.round(nr[x] * 255);
+        const g = Math.round(ng[x] * 255);
+        const b = Math.round(nb[x] * 255);
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        const half = Math.pow(bands.peak[x] / peakMax, 0.6) * mid;
+        ctx.fillRect(x, mid - half, 1, half * 2);
+      }
       return;
     }
-    let cancelled = false;
-    Promise.all([recolor(bands.low, colors.low), recolor(bands.mid, colors.mid), recolor(bands.high, colors.high)])
-      .then(([low, mid, high]) => {
-        if (!cancelled) setRecolored({ low, mid, high });
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [bands, colors.low, colors.mid, colors.high]);
 
-  if (!recolored) return <div className={`bg-black ${className}`} />;
+    const colors = customColors ?? MODE_COLORS["three-band"];
+    const channels: [number[], string][] = [
+      [bands.low, colors.low],
+      [bands.mid, colors.mid],
+      [bands.high, colors.high],
+    ];
+    const gMax = Math.max(...bands.low, ...bands.mid, ...bands.high) || 1;
+    ctx.globalCompositeOperation = "screen";
+    for (const [values, color] of channels) {
+      ctx.fillStyle = color;
+      for (let x = 0; x < n; x++) {
+        const half = Math.pow(values[x] / gMax, 0.5) * mid;
+        ctx.fillRect(x, mid - half, 1, half * 2);
+      }
+    }
+    ctx.globalCompositeOperation = "source-over";
+  }, [bands, mode, customColors]);
 
-  if (mode === "three-band") {
-    return (
-      <div className={`bg-black ${className}`}>
-        <img src={recolored.low} alt="" draggable={false} className="absolute inset-x-0 top-0 h-1/3 w-full object-fill pointer-events-none" />
-        <img src={recolored.mid} alt="" draggable={false} className="absolute inset-x-0 top-1/3 h-1/3 w-full object-fill pointer-events-none" />
-        <img src={recolored.high} alt="" draggable={false} className="absolute inset-x-0 top-2/3 h-1/3 w-full object-fill pointer-events-none" />
-      </div>
-    );
-  }
+  if (!bands) return <div className={`bg-black ${className}`} />;
 
-  return (
-    <div className={`bg-black ${className}`}>
-      <img src={recolored.low} alt="" draggable={false} className="absolute inset-0 w-full h-full object-fill mix-blend-screen pointer-events-none" />
-      <img src={recolored.mid} alt="" draggable={false} className="absolute inset-0 w-full h-full object-fill mix-blend-screen pointer-events-none" />
-      <img src={recolored.high} alt="" draggable={false} className="absolute inset-0 w-full h-full object-fill mix-blend-screen pointer-events-none" />
-    </div>
-  );
+  return <canvas ref={canvasRef} className={`bg-black ${className}`} />;
 }
 
 /** "Classic Blue" mode: the plain pre-existing single-band amplitude
@@ -696,41 +717,9 @@ function TrackDetailModal({
   const waveformColorMode = settings?.waveform_color_mode ?? "three-band";
   const customColors = settings?.waveform_custom_colors ?? null;
 
-  const [bands, setBands] = useState<BandWaveform | null>(null);
-  const [monoWaveform, setMonoWaveform] = useState<string | null>(null);
+  const { bands, mono: monoWaveform } = useTrackWaveform(job.destination, waveformColorMode);
   const [hoverFraction, setHoverFraction] = useState<number | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
-
-  // Only one of the two waveform renders is ever fetched — whichever the
-  // active mode needs — so switching to Classic Blue never pays for the
-  // band-split ffmpeg render, and RGB/3-Band never pay for the plain one.
-  useEffect(() => {
-    if (!job.destination || waveformColorMode === "classic-blue") return;
-    let cancelled = false;
-    api
-      .generateBandWaveform(job.destination)
-      .then((b) => {
-        if (!cancelled) setBands(b);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [job.destination, waveformColorMode]);
-
-  useEffect(() => {
-    if (!job.destination || waveformColorMode !== "classic-blue") return;
-    let cancelled = false;
-    api
-      .generateWaveform(job.destination)
-      .then((uri) => {
-        if (!cancelled) setMonoWaveform(uri);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [job.destination, waveformColorMode]);
 
   // Number keys 1-8 jump to (or, if empty, drop) the matching hot cue;
   // space toggles playback; escape closes. This is the "hotkeys" surface
@@ -826,7 +815,7 @@ function TrackDetailModal({
           {waveformColorMode === "classic-blue" ? (
             <ClassicWaveform src={monoWaveform} className="absolute inset-0 w-full h-full" />
           ) : (
-            <ColoredWaveform
+            <GradientWaveform
               bands={bands}
               mode={waveformColorMode}
               customColors={customColors}
@@ -937,8 +926,9 @@ function DownloadRow({
   onCreateCrateAndAdd: (name: string) => void;
 }) {
   const settings = useAppStore((s) => s.settings);
-  const [waveform, setWaveform] = useState<string | null>(null);
-  const [waveformFailed, setWaveformFailed] = useState(false);
+  const waveformColorMode = settings?.waveform_color_mode ?? "three-band";
+  const customColors = settings?.waveform_custom_colors ?? null;
+  const { bands, mono: waveform } = useTrackWaveform(job.destination, waveformColorMode);
   const { bpm, key, durationSec, analyzing } = useTrackAnalysis(job.destination);
   // The cue-setting cursor: while `selected`, this tracks the shared
   // <audio> element's real position (so it moves during playback and
@@ -950,22 +940,6 @@ function DownloadRow({
   const [cues, setCues] = useState<CuePoint[]>([]);
   const [expanded, setExpanded] = useState(false);
   const waveformBoxRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!job.destination) return;
-    let cancelled = false;
-    api
-      .generateWaveform(job.destination)
-      .then((uri) => {
-        if (!cancelled) setWaveform(uri);
-      })
-      .catch(() => {
-        if (!cancelled) setWaveformFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [job.destination]);
 
   useEffect(() => {
     if (!job.destination) return;
@@ -1102,9 +1076,15 @@ function DownloadRow({
         onMouseLeave={() => setHoverFraction(null)}
         className="relative mt-2 h-10 rounded-md overflow-hidden bg-charcoal-900/60 cursor-pointer select-none"
       >
-        {waveform ? (
-          <img src={waveform} alt="" draggable={false} className="w-full h-full object-cover pointer-events-none" />
-        ) : waveformFailed ? null : (
+        {waveformColorMode === "classic-blue" ? (
+          waveform ? (
+            <ClassicWaveform src={waveform} className="w-full h-full" />
+          ) : (
+            <div className="w-full h-full animate-pulse bg-charcoal-800/50" />
+          )
+        ) : bands ? (
+          <GradientWaveform bands={bands} mode={waveformColorMode} customColors={customColors} className="w-full h-full" />
+        ) : (
           <div className="w-full h-full animate-pulse bg-charcoal-800/50" />
         )}
 
