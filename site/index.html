@@ -224,6 +224,46 @@
       line-height: 1.6;
     }
 
+    /* ── Waveform Marquee ────────────────────────────────────────────── */
+    /* `background-repeat: repeat-x` tiles the image across the *entire*
+       lane width, however wide that ends up being — unlike a fixed number
+       of duplicated elements (which leaves a dead gap once the lane is
+       wider than the copies), a repeating background never runs out of
+       content. Each lane's height matches its image's native pixel height
+       exactly (150px), so `background-size: auto 100%` never fractionally
+       scales the width — the rendered tile width is exactly the image's
+       own pixel width, so the `@keyframes` distance below is an exact
+       integer and the position wraps with no visible seam. */
+    #waveform-marquee { padding: 4rem 2rem; }
+    #waveform-marquee .section-inner { text-align: center; }
+    #waveform-marquee .section-title,
+    #waveform-marquee .section-desc { margin-left: auto; margin-right: auto; }
+    .marquee-lane {
+      height: 150px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background-color: #000;
+      background-repeat: repeat-x;
+      background-size: auto 100%;
+    }
+    #marquee-rgb {
+      background-image: url(waveform-rgb-marquee.png);
+      animation: marquee-scroll-rgb 24s linear infinite;
+    }
+    @keyframes marquee-scroll-rgb {
+      from { background-position-x: 0; }
+      to   { background-position-x: -1288px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .marquee-lane, #marquee-rgb { animation: none; }
+    }
+    .marquee-lane + .marquee-caption { margin-bottom: 2rem; }
+    .marquee-caption {
+      font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);
+      margin-top: 0.75rem;
+    }
+    .marquee-caption strong { color: var(--text-dim); font-weight: 600; }
+
     /* ── How It Works ────────────────────────────────────────────────── */
     .steps { display: flex; gap: 2rem; flex-wrap: wrap; }
     .step {
@@ -593,6 +633,170 @@
       </div>
     </div>
 </section>
+
+<!-- ── Waveform Marquee ─────────────────────────────────────────── -->
+<section id="waveform-marquee">
+  <div class="section-inner">
+    <p class="section-label">Colored Waveform View</p>
+    <h2 class="section-title">See a track's frequency balance, not just its volume.</h2>
+    <p class="section-desc">Two ways to read a waveform at a glance — pick whichever reads best for your ears.</p>
+
+    <div class="marquee-lane" id="marquee-rgb" role="img" aria-label="RGB waveform mode: a continuous red, green, and blue gradient waveform"></div>
+    <p class="marquee-caption"><strong>RGB Mode</strong> — true low/mid/high spectral color, computed live off a real 2048-bin FFT</p>
+
+    <div class="marquee-lane" id="marquee-band" role="img" aria-label="3-Band waveform mode: stacked blue, amber, and white waveform bands"></div>
+    <p class="marquee-caption"><strong>3-Band Mode</strong> — blue/amber/white bands scaled against each other, so a drop reads loud and a breakdown reads thin</p>
+  </div>
+</section>
+<script>
+  // Synthesizes a short test track (intro / groove / breakdown / drop) and
+  // runs a real 2048-bin STFT over it — the exact technique the app's
+  // `GradientWaveform` uses on real audio — so the marquee shows genuine
+  // musical structure (a drop reading loud/red, a breakdown collapsing to a
+  // thin line) instead of a generic decorative squiggle.
+  (() => {
+    const SR = 22050, DUR = 18, N = SR * DUR;
+    const buf = new Float32Array(N);
+
+    function addTone(start, dur, freq, amp, decay, vibrato) {
+      const s = Math.floor(start * SR), e = Math.min(N, Math.floor((start + dur) * SR));
+      for (let i = s; i < e; i++) {
+        const t = (i - s) / SR;
+        const env = decay ? Math.exp(-decay * t) : 1;
+        const f = vibrato ? freq * (1 + 0.01 * Math.sin(2 * Math.PI * 5.5 * t)) : freq;
+        buf[i] += amp * env * Math.sin(2 * Math.PI * f * t);
+      }
+    }
+    function addNoise(start, dur, amp, decay) {
+      const s = Math.floor(start * SR), e = Math.min(N, Math.floor((start + dur) * SR));
+      let last = 0;
+      for (let i = s; i < e; i++) {
+        const t = (i - s) / SR;
+        const env = Math.exp(-decay * t);
+        last = 0.999 * last + 0.001 * (Math.random() * 2 - 1);
+        buf[i] += amp * env * (last * 18);
+      }
+    }
+
+    // Kick + hats through most of the clip, with a breakdown gap (10-13s).
+    for (let b = 0; b < DUR; b += 1) {
+      if (b < 13 || b >= 15) {
+        addTone(b, 0.6, 52, 0.9, 6);
+        addNoise(b, 0.012, 0.5, 200);
+      }
+    }
+    for (let h = 0; h < DUR * 8; h++) addNoise(h / 8, 0.07, 0.16, 55);
+
+    // Bassline + pads, silent during the breakdown; a lead through the back
+    // half stands in for a drop.
+    const roots = [82.41, 98, 82.41, 130.81, 110, 98, 87.31, 82.41];
+    for (let i = 0; i < 9; i++) {
+      const t = i * 2;
+      if (t < 10 || t >= 13) addTone(t, 2, roots[i % roots.length], 0.35, 0.4);
+    }
+    const chords = [[220, 261.63, 329.63, 440], [174.61, 220, 261.63, 349.23], [196, 246.94, 293.66, 392], [146.83, 196, 220, 293.66]];
+    for (let c = 0; c < 5; c++) {
+      const t = c * 2;
+      if (t < 10) for (const f of chords[c % 4]) addTone(t, 2, f, 0.06, 0.12);
+    }
+    const lead = [[440, 0], [523.25, 0.5], [659.25, 1], [523.25, 1.5], [587.33, 2], [659.25, 2.5], [587.33, 3], [440, 3.5]];
+    for (let bar = 0; bar < 4; bar++) {
+      const base = 13 + bar * 4;
+      if (base >= DUR) break;
+      for (const [f, off] of lead) addTone(base + off, 0.42, f, 0.1, 2.5, true);
+    }
+
+    // Minimal iterative radix-2 FFT — magnitude spectrum only, real input.
+    function fftMag(re, im) {
+      const n = re.length;
+      for (let i = 1, j = 0; i < n; i++) {
+        let bit = n >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) {
+          let t = re[i]; re[i] = re[j]; re[j] = t;
+          t = im[i]; im[i] = im[j]; im[j] = t;
+        }
+      }
+      for (let len = 2; len <= n; len <<= 1) {
+        const ang = -2 * Math.PI / len;
+        const wRe = Math.cos(ang), wIm = Math.sin(ang);
+        for (let i = 0; i < n; i += len) {
+          let cRe = 1, cIm = 0;
+          for (let k = 0; k < len >> 1; k++) {
+            const aRe = re[i + k], aIm = im[i + k];
+            const bRe = re[i + k + (len >> 1)] * cRe - im[i + k + (len >> 1)] * cIm;
+            const bIm = re[i + k + (len >> 1)] * cIm + im[i + k + (len >> 1)] * cRe;
+            re[i + k] = aRe + bRe; im[i + k] = aIm + bIm;
+            re[i + k + (len >> 1)] = aRe - bRe; im[i + k + (len >> 1)] = aIm - bIm;
+            const nRe = cRe * wRe - cIm * wIm;
+            cIm = cRe * wIm + cIm * wRe;
+            cRe = nRe;
+          }
+        }
+      }
+      const mag = new Float32Array(n);
+      for (let i = 0; i < n; i++) mag[i] = Math.hypot(re[i], im[i]);
+      return mag;
+    }
+
+    const FFT = 2048, HOP = 512;
+    const hann = new Float32Array(FFT);
+    for (let i = 0; i < FFT; i++) hann[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (FFT - 1)));
+    const hzPerBin = SR / FFT;
+    const lowEnd = Math.floor(250 / hzPerBin), midEnd = Math.floor(4000 / hzPerBin), nyq = FFT >> 1;
+    const re = new Float32Array(FFT), im = new Float32Array(FFT);
+    const cols = [];
+    for (let start = 0; start + FFT <= N; start += HOP) {
+      for (let i = 0; i < FFT; i++) { re[i] = buf[start + i] * hann[i]; im[i] = 0; }
+      const mag = fftMag(re, im);
+      let low = 0, mid = 0, high = 0, peak = 0;
+      for (let b = 0; b <= nyq; b++) {
+        const m = mag[b];
+        if (m > peak) peak = m;
+        if (b < lowEnd) low += m; else if (b < midEnd) mid += m; else high += m;
+      }
+      cols.push({ low, mid, high, peak });
+    }
+
+    const nCols = cols.length;
+    const eLow = cols.map((c) => c.low), eMid = cols.map((c) => c.mid), eHigh = cols.map((c) => c.high);
+    const gMax = Math.max(...eLow, ...eMid, ...eHigh);
+
+    // Mirrors the app's real 3-Band render (see `GradientWaveform` in
+    // apps/desktop/src/workspaces/LibraryWorkspace.tsx): blue/amber/white
+    // stacked with additive `screen` blending, each band scaled against one
+    // shared max so relative loudness between bands survives. Drawn at the
+    // same 150px height as `.marquee-lane` (see its CSS comment) so
+    // `background-size: auto 100%` never fractionally scales the width —
+    // the injected keyframe distance below (`nCols`) is exact.
+    const TILE_H = 150, midY = TILE_H / 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = nCols;
+    canvas.height = TILE_H;
+    const ctx = canvas.getContext("2d");
+    ctx.globalCompositeOperation = "screen";
+    for (const [values, color] of [[eLow, "#0a84ff"], [eMid, "#ff9f0a"], [eHigh, "#ececec"]]) {
+      ctx.fillStyle = color;
+      for (let x = 0; x < nCols; x++) {
+        const half = Math.pow(values[x] / gMax, 0.5) * midY;
+        ctx.fillRect(x, midY - half, 1, half * 2);
+      }
+    }
+
+    const bandLane = document.getElementById("marquee-band");
+    bandLane.style.backgroundImage = `url(${canvas.toDataURL("image/png")})`;
+
+    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      const style = document.createElement("style");
+      style.textContent = `
+        @keyframes marquee-scroll-band { from { background-position-x: 0; } to { background-position-x: -${nCols}px; } }
+        #marquee-band { animation: marquee-scroll-band ${Math.round(nCols / 55)}s linear infinite; }
+      `;
+      document.head.appendChild(style);
+    }
+  })();
+</script>
 
 <!-- ── How It Works ─────────────────────────────────────────────── -->
 <section>
