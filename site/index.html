@@ -949,15 +949,15 @@
       Free and open source. No account required. Download, run, and start preparing your sets.
     </p>
     <div class="hero-buttons" style="justify-content: center;">
-      <a href="https://github.com/illyangz/open-dj/releases/latest" id="dl-mac" class="btn btn-primary">
+      <a href="https://github.com/illyangz/open-dj/releases/latest/download/OpenDJ-macOS.dmg" id="dl-mac" class="btn btn-primary">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         macOS
       </a>
-      <a href="https://github.com/illyangz/open-dj/releases/latest" id="dl-win" class="btn btn-secondary">
+      <a href="https://github.com/illyangz/open-dj/releases/latest/download/OpenDJ-Windows.exe" id="dl-win" class="btn btn-secondary">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Windows
       </a>
-      <a href="https://github.com/illyangz/open-dj/releases/latest" id="dl-linux" class="btn btn-secondary">
+      <a href="https://github.com/illyangz/open-dj/releases/latest/download/OpenDJ-Linux.AppImage" id="dl-linux" class="btn btn-secondary">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Linux
       </a>
@@ -990,38 +990,23 @@
 </footer>
 
 <script>
-  // Buttons default to the releases page (set in HTML above) so a slow or
-  // failed API call never leaves a dead "#" link — this only upgrades them
-  // to the exact installer file when it can, and never breaks on a fresh
-  // repo with no releases yet.
+  // The download buttons themselves are plain static links straight to a
+  // release asset (see the CTA section) — release.yml uploads an extra,
+  // identically-named-every-release copy of each installer alongside the
+  // real (version-named) one specifically so these links never need to
+  // change or be resolved at runtime. This script only fills in the
+  // decorative version badge; if the fetch fails (offline, rate-limited),
+  // the badge just keeps its static fallback text — downloads are
+  // unaffected either way.
   (async () => {
-    const REPO = "illyangz/open-dj";
     try {
-      const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
+      const res = await fetch("https://api.github.com/repos/illyangz/open-dj/releases/latest");
       if (!res.ok) return;
       const release = await res.json();
-      const assets = release.assets || [];
-
       const badge = document.getElementById("version-badge");
       if (badge && release.tag_name) badge.textContent = release.tag_name;
-
-      const findAsset = (...suffixes) =>
-        assets.find((a) => suffixes.some((s) => a.name.toLowerCase().endsWith(s)));
-
-      const mac = findAsset(".dmg");
-      const win = findAsset(".exe", ".msi");
-      const linux = findAsset(".appimage", ".deb", ".rpm");
-
-      const wire = (id, asset) => {
-        const el = document.getElementById(id);
-        if (el && asset) el.href = asset.browser_download_url;
-      };
-      wire("dl-mac", mac);
-      wire("dl-win", win);
-      wire("dl-linux", linux);
     } catch {
-      // Offline / rate-limited — fallback hrefs already point at the
-      // releases page, so downloads still work, just one click further.
+      // Offline / rate-limited — badge keeps its static fallback text.
     }
   })();
 </script>

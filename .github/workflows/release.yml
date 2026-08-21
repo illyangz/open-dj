@@ -127,3 +127,40 @@ jobs:
           # find new versions.
           releaseDraft: false
           prerelease: false
+
+      # Tauri's own installer filenames embed the version
+      # (OpenDJ_0.3.4_aarch64.dmg), so a version-agnostic link like
+      # .../releases/latest/download/OpenDJ-macOS.dmg would 404 the moment
+      # the next release ships under a different filename. Uploading an
+      # extra, identically-named-every-release copy alongside the real
+      # installer means the marketing site's download buttons can be plain
+      # static links (see site/index.html) — no client-side GitHub API call,
+      # no rate-limit risk, no landing on the releases page to hunt for the
+      # right file.
+      - name: Upload stable-named download link (macOS)
+        if: matrix.platform == 'macos-latest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          asset=$(find apps/desktop/src-tauri/target -name "*.dmg" | head -1)
+          cp "$asset" OpenDJ-macOS.dmg
+          gh release upload "${{ github.ref_name }}" OpenDJ-macOS.dmg --clobber --repo "${{ github.repository }}"
+
+      - name: Upload stable-named download link (Windows)
+        if: matrix.platform == 'windows-latest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $asset = Get-ChildItem -Recurse -Path apps/desktop/src-tauri/target -Filter *.exe | Select-Object -First 1
+          Copy-Item $asset.FullName OpenDJ-Windows.exe
+          gh release upload "${{ github.ref_name }}" OpenDJ-Windows.exe --clobber --repo "${{ github.repository }}"
+
+      - name: Upload stable-named download link (Linux)
+        if: matrix.platform == 'ubuntu-latest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          asset=$(find apps/desktop/src-tauri/target -iname "*.AppImage" | head -1)
+          cp "$asset" OpenDJ-Linux.AppImage
+          gh release upload "${{ github.ref_name }}" OpenDJ-Linux.AppImage --clobber --repo "${{ github.repository }}"
