@@ -264,6 +264,22 @@
     }
     .marquee-caption strong { color: var(--text-dim); font-weight: 600; }
 
+    /* ── Install command (CTA) ───────────────────────────────────────── */
+    .cmd-block {
+      background: var(--bg-card-hover);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 1rem 1.25rem;
+      margin: 1.5rem auto 0;
+      max-width: 560px;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      overflow-x: auto;
+      text-align: left;
+    }
+    .cmd-block .prompt { color: var(--signal); user-select: none; }
+
     /* ── How It Works ────────────────────────────────────────────────── */
     .steps { display: flex; gap: 2rem; flex-wrap: wrap; }
     .step {
@@ -966,9 +982,15 @@
         GitHub
       </a>
     </div>
-    <p style="margin-top: 1.25rem; font-size: 0.85rem; color: var(--text-muted);">
-      macOS says OpenDJ &ldquo;is damaged&rdquo;? That's Gatekeeper on a non-notarized build, not a bad download —
-      <a href="docs.html#macos-blocks">one Terminal command fixes it</a>.
+    <p style="margin-top: 1.5rem; font-size: 0.85rem; color: var(--text-muted);">
+      On macOS, skip the Gatekeeper &ldquo;is damaged&rdquo; dialog entirely &mdash; paste this into Terminal instead of using the button above:
+    </p>
+    <div class="cmd-block">
+      <span class="prompt">$ </span>curl -fsSL https://illyangz.github.io/open-dj/install.sh | bash
+    </div>
+    <p style="margin-top: 0.75rem; font-size: 0.8rem; color: var(--text-muted);">
+      Downloads and installs directly, bypassing the browser download path that triggers Gatekeeper on a
+      non-notarized app. Prefer to do it by hand? <a href="docs.html#macos-blocks">one Terminal command fixes the dialog</a> after using the button above.
     </p>
   </div>
 </section>

@@ -287,10 +287,14 @@
     <h2 id="installation">Installation</h2>
 
     <h3>macOS (recommended)</h3>
-    <p>Download the latest <code>.dmg</code> from the <a href="index.html#cta">download page</a>, open it, and drag OpenDJ to your Applications folder. That's it &mdash; <strong>yt-dlp</strong> and <strong>ffmpeg</strong> ship inside the app, nothing to install separately.</p>
+    <p>OpenDJ isn't Apple-notarized yet (that requires a paid Developer account), so a plain browser download of the <code>.dmg</code> gets flagged by Gatekeeper as <em>&ldquo;damaged&rdquo;</em> on first launch &mdash; misleading, since nothing is actually corrupt. The install script sidesteps this entirely by fetching and installing the app directly, outside the browser download path that triggers the flag in the first place:</p>
+    <div class="cmd-block">
+      <span class="prompt">$ </span>curl -fsSL https://illyangz.github.io/open-dj/install.sh | bash
+    </div>
+    <p>No dialog, no extra steps. <strong>yt-dlp</strong> and <strong>ffmpeg</strong> ship inside the app either way &mdash; nothing else to install.</p>
 
     <div class="callout">
-      <p><strong>First launch:</strong> macOS will say <em>&ldquo;OpenDJ&rdquo; is damaged and can&rsquo;t be opened</em> &mdash; that's Gatekeeper reacting to a fresh download that isn't Apple-notarized yet, not an actual corrupt file. There's no "Open Anyway" button for this one; clear the quarantine flag instead, after dragging OpenDJ to Applications:</p>
+      <p><strong>Prefer downloading by hand?</strong> Grab the <code>.dmg</code> from the <a href="index.html#cta">download page</a> and drag OpenDJ to Applications instead &mdash; but that path <em>will</em> trigger the Gatekeeper dialog. Clear it with:</p>
       <div class="cmd-block">
         <span class="prompt">$ </span>xattr -cr /Applications/OpenDJ.app
       </div>
@@ -506,7 +510,9 @@
     <p>SoundCloud periodically rotates their JavaScript assets. If detection fails, restart OpenDJ to re-fetch the latest scripts.</p>
 
     <h3 id="macos-blocks">macOS says OpenDJ "is damaged and can't be opened"</h3>
-    <p>This is Gatekeeper, not an actually corrupt download — OpenDJ isn't Apple-notarized yet, so a fresh browser download gets quarantined and macOS shows this (misleading) message instead of the usual "unidentified developer" prompt. Fix it once per download from Terminal, after dragging OpenDJ.app to Applications:</p>
+    <p>This is Gatekeeper, not an actually corrupt download — OpenDJ isn't Apple-notarized yet, so a fresh browser download gets quarantined and macOS shows this (misleading) message instead of the usual "unidentified developer" prompt. Two ways to fix it:</p>
+    <p><strong>Avoid it next time:</strong> use the <a href="index.html#cta">install script</a> instead of the browser download — it never triggers the flag in the first place.</p>
+    <p><strong>Already hit it?</strong> Fix it once per download from Terminal, after dragging OpenDJ.app to Applications:</p>
     <div class="cmd-block">
       <span class="prompt">$ </span>xattr -cr /Applications/OpenDJ.app
     </div>
