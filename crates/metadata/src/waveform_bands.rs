@@ -90,5 +90,10 @@ pub fn analyze_band_waveform(path: &Path, target_columns: usize) -> Result<BandW
         start += hop;
     }
 
-    Ok(BandWaveform { low, mid, high, peak })
+    Ok(BandWaveform {
+        low,
+        mid,
+        high,
+        peak,
+    })
 }
