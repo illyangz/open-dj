@@ -132,13 +132,15 @@ export function SettingsWorkspace() {
             />
             {!tools.ytdlp_path && (
               <p className="text-xs text-amber mt-2">
-                yt-dlp is required for downloading. Install with:{" "}
+                yt-dlp is required for downloading. It ships inside official OpenDJ builds — this
+                shouldn't happen; try reinstalling. Running from source? Install with:{" "}
                 <span className="font-mono">brew install yt-dlp</span>
               </p>
             )}
             {!tools.ffmpeg_path && (
               <p className="text-xs text-amber mt-2">
-                ffmpeg is required for audio conversion. Install with:{" "}
+                ffmpeg is required for audio conversion. It ships inside official OpenDJ builds —
+                this shouldn't happen; try reinstalling. Running from source? Install with:{" "}
                 <span className="font-mono">brew install ffmpeg</span>
               </p>
             )}

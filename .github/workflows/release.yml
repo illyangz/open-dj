@@ -38,6 +38,14 @@ jobs:
 
   build:
     needs: deploy-backend
+    # Pin, not "latest" — reproducible builds (two runs of the same tag
+    # should produce the same bundled tool), and makes yt-dlp's known
+    # staleness-over-time (it needs frequent updates to track YouTube's
+    # anti-bot changes) an explicit, visible, single-line bump rather than a
+    # silently moving target. Bump periodically; see
+    # https://github.com/yt-dlp/yt-dlp/releases for the latest tag.
+    env:
+      YTDLP_VERSION: "2026.08.19"
     strategy:
       fail-fast: false
       matrix:
@@ -49,12 +57,20 @@ jobs:
           # half of a universal build fails outright at link time. Building
           # arm64-only sidesteps that; the trade-off is dropping support for
           # Intel Macs (pre-November 2020) entirely, not just stems on them.
+          #
+          # `--config src-tauri/tauri.release.conf.json` merges in `bundle.externalBin`
+          # for ffmpeg/yt-dlp (staged into src-tauri/binaries/ by the steps
+          # below) — kept out of the base tauri.conf.json deliberately:
+          # `tauri_build::build()` validates that every externalBin path
+          # actually exists *at compile time*, unconditionally, even for a
+          # plain `cargo check` — putting it in the base config would break
+          # local dev for anyone who hasn't fetched ~150MB of binaries first.
           - platform: macos-latest
-            args: "--target aarch64-apple-darwin"
+            args: "--target aarch64-apple-darwin --config src-tauri/tauri.release.conf.json"
           - platform: ubuntu-latest
-            args: ""
+            args: "--config src-tauri/tauri.release.conf.json"
           - platform: windows-latest
-            args: ""
+            args: "--config src-tauri/tauri.release.conf.json"
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -93,6 +109,67 @@ jobs:
         run: |
           brew install libkeyfinder pkgconf
           bash scripts/build-keyfinder-bridge.sh
+
+      # Bundled so users never need `brew install ffmpeg yt-dlp` themselves
+      # — see crates/providers/src/yt_dlp_bin.rs's `find_in_bundle()`, which
+      # already checks the app bundle's Resources dir first (that discovery
+      # code needed no changes for this; it was already bundle-aware). Both
+      # binaries land in apps/desktop/src-tauri/binaries/, named with the
+      # Rust target-triple suffix Tauri's `externalBin` expects to find at
+      # build time (see tauri.conf.json's bundle.externalBin), and get
+      # stripped back to plain `ffmpeg`/`yt-dlp` when copied into the final
+      # bundle. OpenDJ itself is GPL-3.0-or-later, so a GPL-flavored ffmpeg
+      # build (full codec set, e.g. libx264) is license-compatible — no
+      # need to hunt for an LGPL-only build. yt-dlp is Unlicense (public
+      # domain), no compliance concern either way.
+      # evermeet.cx (the "usual" macOS static-ffmpeg source) explicitly does
+      # not build for Apple Silicon — its binary is x86_64-only and would
+      # only run on this arm64-only build via Rosetta, if installed at all.
+      # osxexperts.net's arm-native build was verified (2026-08-21) to link
+      # only against macOS system frameworks (/System/Library/..., /usr/lib)
+      # — no Homebrew or other third-party dylib paths — confirmed via
+      # `otool -L`, so it's genuinely self-contained on any Mac, unlike a
+      # `brew install ffmpeg` binary (which dynamically links dozens of
+      # Homebrew-path dylibs that don't exist on a user's machine at all).
+      - name: Stage ffmpeg + yt-dlp (macOS)
+        if: matrix.platform == 'macos-latest'
+        run: |
+          set -euxo pipefail
+          mkdir -p apps/desktop/src-tauri/binaries
+          curl -L -o /tmp/ffmpeg.zip https://www.osxexperts.net/ffmpeg9arm.zip
+          unzip -o /tmp/ffmpeg.zip -d /tmp/ffmpeg-extract
+          cp /tmp/ffmpeg-extract/ffmpeg apps/desktop/src-tauri/binaries/ffmpeg-aarch64-apple-darwin
+          chmod +x apps/desktop/src-tauri/binaries/ffmpeg-aarch64-apple-darwin
+          curl -L -o apps/desktop/src-tauri/binaries/yt-dlp-aarch64-apple-darwin \
+            "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp_macos"
+          chmod +x apps/desktop/src-tauri/binaries/yt-dlp-aarch64-apple-darwin
+
+      - name: Stage ffmpeg + yt-dlp (Linux)
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          set -euxo pipefail
+          mkdir -p apps/desktop/src-tauri/binaries
+          curl -L -o /tmp/ffmpeg.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+          curl -L -o /tmp/ffmpeg.tar.xz.md5 https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz.md5
+          (cd /tmp && md5sum -c ffmpeg.tar.xz.md5)
+          tar -xf /tmp/ffmpeg.tar.xz -C /tmp
+          cp /tmp/ffmpeg-*-amd64-static/ffmpeg apps/desktop/src-tauri/binaries/ffmpeg-x86_64-unknown-linux-gnu
+          chmod +x apps/desktop/src-tauri/binaries/ffmpeg-x86_64-unknown-linux-gnu
+          curl -L -o apps/desktop/src-tauri/binaries/yt-dlp-x86_64-unknown-linux-gnu \
+            "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp_linux"
+          chmod +x apps/desktop/src-tauri/binaries/yt-dlp-x86_64-unknown-linux-gnu
+
+      - name: Stage ffmpeg + yt-dlp (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path apps/desktop/src-tauri/binaries
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile ffmpeg.zip
+          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg-extract
+          $ffmpegExe = Get-ChildItem -Recurse -Path ffmpeg-extract -Filter ffmpeg.exe | Select-Object -First 1
+          Copy-Item $ffmpegExe.FullName apps/desktop/src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe
+          Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/download/$env:YTDLP_VERSION/yt-dlp.exe" `
+            -OutFile apps/desktop/src-tauri/binaries/yt-dlp-x86_64-pc-windows-msvc.exe
 
       # TAURI_SIGNING_PRIVATE_KEY (and, if the key was generated with a
       # password, TAURI_SIGNING_PRIVATE_KEY_PASSWORD) must be set as repo
@@ -137,13 +214,20 @@ jobs:
       # static links (see site/index.html) — no client-side GitHub API call,
       # no rate-limit risk, no landing on the releases page to hunt for the
       # right file.
+      # Round-trips through the release itself (download the just-uploaded
+      # versioned asset by pattern, re-upload under the stable name) rather
+      # than hunting for the file on the runner's local filesystem — the
+      # exact local bundle output path is an implementation detail of the
+      # tauri-action version in use and not worth depending on, whereas "an
+      # asset matching *.dmg exists on this release" is exactly what the
+      # previous step already guarantees.
       - name: Upload stable-named download link (macOS)
         if: matrix.platform == 'macos-latest'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          asset=$(find apps/desktop/src-tauri/target -name "*.dmg" | head -1)
-          cp "$asset" OpenDJ-macOS.dmg
+          set -euxo pipefail
+          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern "*.dmg" --output OpenDJ-macOS.dmg --clobber
           gh release upload "${{ github.ref_name }}" OpenDJ-macOS.dmg --clobber --repo "${{ github.repository }}"
 
       - name: Upload stable-named download link (Windows)
@@ -152,15 +236,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
-          $asset = Get-ChildItem -Recurse -Path apps/desktop/src-tauri/target -Filter *.exe | Select-Object -First 1
-          Copy-Item $asset.FullName OpenDJ-Windows.exe
+          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern "*.exe" --output OpenDJ-Windows.exe --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           gh release upload "${{ github.ref_name }}" OpenDJ-Windows.exe --clobber --repo "${{ github.repository }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload stable-named download link (Linux)
         if: matrix.platform == 'ubuntu-latest'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          asset=$(find apps/desktop/src-tauri/target -iname "*.AppImage" | head -1)
-          cp "$asset" OpenDJ-Linux.AppImage
+          set -euxo pipefail
+          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern "*.AppImage" --output OpenDJ-Linux.AppImage --clobber
           gh release upload "${{ github.ref_name }}" OpenDJ-Linux.AppImage --clobber --repo "${{ github.repository }}"

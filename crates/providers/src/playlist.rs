@@ -27,7 +27,9 @@ pub enum PlaylistError {
 /// return multiple.
 pub async fn expand_playlist(url: &str) -> std::result::Result<Vec<PlaylistEntry>, PlaylistError> {
     let ytdlp = yt_dlp_bin::find_ytdlp().ok_or_else(|| {
-        PlaylistError::BinaryNotFound("yt-dlp not found. Install with: brew install yt-dlp".into())
+        PlaylistError::BinaryNotFound(
+            "yt-dlp not found. This shouldn't happen in an official build — try reinstalling OpenDJ. Running from source? brew install yt-dlp".into(),
+        )
     })?;
 
     let output = tokio::process::Command::new(&ytdlp)

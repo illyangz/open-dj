@@ -350,7 +350,7 @@ pub async fn generate_waveform(
 
     if !cache_path.exists() {
         let ffmpeg = opendj_providers::yt_dlp_bin::find_ffmpeg()
-            .ok_or("ffmpeg not found. Install it with: brew install ffmpeg".to_string())?;
+            .ok_or("ffmpeg not found. This shouldn't happen in an official build — try reinstalling OpenDJ. Running from source? brew install ffmpeg".to_string())?;
 
         let _permit = state
             .analysis_semaphore

@@ -287,12 +287,7 @@
     <h2 id="installation">Installation</h2>
 
     <h3>macOS (recommended)</h3>
-    <p>Download the latest <code>.dmg</code> from the <a href="index.html#cta">download page</a>, open it, and drag OpenDJ to your Applications folder.</p>
-
-    <p>OpenDJ requires <strong>yt-dlp</strong> and <strong>ffmpeg</strong> for downloading and converting audio. Install them with Homebrew:</p>
-    <div class="cmd-block">
-      <span class="prompt">$ </span>brew install yt-dlp ffmpeg
-    </div>
+    <p>Download the latest <code>.dmg</code> from the <a href="index.html#cta">download page</a>, open it, and drag OpenDJ to your Applications folder. That's it &mdash; <strong>yt-dlp</strong> and <strong>ffmpeg</strong> ship inside the app, nothing to install separately.</p>
 
     <div class="callout">
       <p><strong>First launch:</strong> macOS will say <em>&ldquo;OpenDJ&rdquo; is damaged and can&rsquo;t be opened</em> &mdash; that's Gatekeeper reacting to a fresh download that isn't Apple-notarized yet, not an actual corrupt file. There's no "Open Anyway" button for this one; clear the quarantine flag instead, after dragging OpenDJ to Applications:</p>
@@ -303,8 +298,9 @@
     </div>
 
     <h3>From source</h3>
-    <p>If you want to build from source, you'll need Rust, Node.js, and pnpm:</p>
+    <p>If you want to build from source, you'll need Rust, Node.js, and pnpm &mdash; plus <strong>yt-dlp</strong> and <strong>ffmpeg</strong> on your own PATH, since the bundling step only runs in release CI, not a local <code>cargo tauri dev</code>:</p>
     <div class="cmd-block">
+      <span class="prompt">$ </span>brew install yt-dlp ffmpeg<br>
       <span class="prompt">$ </span>git clone https://github.com/illyangz/open-dj.git<br>
       <span class="prompt">$ </span>cd open-dj<br>
       <span class="prompt">$ </span>pnpm install<br>
@@ -326,8 +322,8 @@
       <tr><th>Component</th><th>Requirement</th></tr>
       <tr><td>OS</td><td>macOS 12+ (Monterey or later)</td></tr>
       <tr><td>RAM</td><td>4 GB minimum, 8 GB recommended</td></tr>
-      <tr><td>Disk</td><td>200 MB for app + space for your library</td></tr>
-      <tr><td>Dependencies</td><td>yt-dlp, ffmpeg (installed via Homebrew)</td></tr>
+      <tr><td>Disk</td><td>~300 MB for app (yt-dlp and ffmpeg included) + space for your library</td></tr>
+      <tr><td>Dependencies</td><td>None &mdash; yt-dlp and ffmpeg are bundled</td></tr>
     </table>
 
     <!-- Downloading Tracks -->
@@ -497,11 +493,8 @@
     <!-- Troubleshooting -->
     <h2 id="troubleshooting">Troubleshooting</h2>
 
-    <h3>"yt-dlp not found"</h3>
-    <p>Install yt-dlp: <code>brew install yt-dlp</code>. If already installed, check that it's in your PATH.</p>
-
-    <h3>"ffmpeg not found"</h3>
-    <p>Install ffmpeg: <code>brew install ffmpeg</code>.</p>
+    <h3>"yt-dlp not found" or "ffmpeg not found"</h3>
+    <p>Both ship inside official OpenDJ downloads, so this shouldn't happen &mdash; if it does, your install is likely corrupted; redownload from the <a href="index.html#cta">download page</a>. Running from source instead? Install both yourself: <code>brew install yt-dlp ffmpeg</code>, and confirm they're on your PATH.</p>
 
     <h3>Downloads are slow</h3>
     <p>Check your network concurrency setting. Default is 6 simultaneous downloads. Increase to 8&ndash;16 on fast connections.</p>

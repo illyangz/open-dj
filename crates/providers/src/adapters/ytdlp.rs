@@ -59,7 +59,7 @@ impl YtdlpAdapter {
 
     fn ytdlp_path() -> Result<PathBuf> {
         yt_dlp_bin::find_ytdlp().ok_or(ProviderError::NotConfigured(
-            "yt-dlp not found. Install it with: brew install yt-dlp",
+            "yt-dlp not found. This shouldn't happen in an official build — try reinstalling OpenDJ. Running from source? brew install yt-dlp",
         ))
     }
 
@@ -722,7 +722,7 @@ impl ProviderAdapter for YtdlpAdapter {
         let ytdlp = Self::ytdlp_path()?;
 
         let ffmpeg_path = yt_dlp_bin::find_ffmpeg().ok_or(ProviderError::NotConfigured(
-            "ffmpeg not found. Install it with: brew install ffmpeg",
+            "ffmpeg not found. This shouldn't happen in an official build — try reinstalling OpenDJ. Running from source? brew install ffmpeg",
         ))?;
 
         // YouTube's default/android_vr clients will list formats fine but then

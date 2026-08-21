@@ -10,3 +10,8 @@
 # release CI rebuilds this fresh; committing it would bake a stale
 # platform-specific binary into the repo.
 /resources/*.dylib
+
+# Fetched by release CI (see .github/workflows/release.yml) — ffmpeg/yt-dlp
+# sidecar binaries for the `externalBin` bundle, multi-hundred-MB and
+# platform-specific, so not committed; fetched fresh every release build.
+/binaries/
