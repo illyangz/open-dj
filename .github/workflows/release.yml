@@ -149,11 +149,16 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p apps/desktop/src-tauri/binaries
-          curl -L -o /tmp/ffmpeg.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
-          curl -L -o /tmp/ffmpeg.tar.xz.md5 https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz.md5
-          (cd /tmp && md5sum -c ffmpeg.tar.xz.md5)
-          tar -xf /tmp/ffmpeg.tar.xz -C /tmp
-          cp /tmp/ffmpeg-*-amd64-static/ffmpeg apps/desktop/src-tauri/binaries/ffmpeg-x86_64-unknown-linux-gnu
+          mkdir -p /tmp/ffmpeg-dl && cd /tmp/ffmpeg-dl
+          # -O (not -o) keeps johnvansickle's own filenames — the .md5
+          # sidecar's checksum line references that exact original name, so
+          # renaming the download breaks `md5sum -c`'s own file lookup.
+          curl -LO https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+          curl -LO https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz.md5
+          md5sum -c ffmpeg-release-amd64-static.tar.xz.md5
+          tar -xf ffmpeg-release-amd64-static.tar.xz
+          cd -
+          cp /tmp/ffmpeg-dl/ffmpeg-*-amd64-static/ffmpeg apps/desktop/src-tauri/binaries/ffmpeg-x86_64-unknown-linux-gnu
           chmod +x apps/desktop/src-tauri/binaries/ffmpeg-x86_64-unknown-linux-gnu
           curl -L -o apps/desktop/src-tauri/binaries/yt-dlp-x86_64-unknown-linux-gnu \
             "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp_linux"
