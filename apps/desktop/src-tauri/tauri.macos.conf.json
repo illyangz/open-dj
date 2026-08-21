@@ -5,7 +5,8 @@
       "resources/libopendj_keyfinder_bridge.dylib": "libopendj_keyfinder_bridge.dylib"
     },
     "macOS": {
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "hardenedRuntime": false
     }
   }
 }
