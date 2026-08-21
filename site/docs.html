@@ -295,7 +295,11 @@
     </div>
 
     <div class="callout">
-      <p><strong>First launch:</strong> macOS may warn that OpenDJ is from an unidentified developer. Go to <em>System Settings &rarr; Privacy &amp; Security</em> and click "Open Anyway".</p>
+      <p><strong>First launch:</strong> macOS will say <em>&ldquo;OpenDJ&rdquo; is damaged and can&rsquo;t be opened</em> &mdash; that's Gatekeeper reacting to a fresh download that isn't Apple-notarized yet, not an actual corrupt file. There's no "Open Anyway" button for this one; clear the quarantine flag instead, after dragging OpenDJ to Applications:</p>
+      <div class="cmd-block">
+        <span class="prompt">$ </span>xattr -cr /Applications/OpenDJ.app
+      </div>
+      <p>Then open OpenDJ normally. You only need to do this once per download.</p>
     </div>
 
     <h3>From source</h3>
@@ -508,8 +512,12 @@
     <h3>SoundCloud client_id not detected</h3>
     <p>SoundCloud periodically rotates their JavaScript assets. If detection fails, restart OpenDJ to re-fetch the latest scripts.</p>
 
-    <h3>macOS blocks the app</h3>
-    <p>Go to <em>System Settings &rarr; Privacy &amp; Security</em> and click "Open Anyway" next to the OpenDJ warning.</p>
+    <h3 id="macos-blocks">macOS says OpenDJ "is damaged and can't be opened"</h3>
+    <p>This is Gatekeeper, not an actually corrupt download — OpenDJ isn't Apple-notarized yet, so a fresh browser download gets quarantined and macOS shows this (misleading) message instead of the usual "unidentified developer" prompt. Fix it once per download from Terminal, after dragging OpenDJ.app to Applications:</p>
+    <div class="cmd-block">
+      <span class="prompt">$ </span>xattr -cr /Applications/OpenDJ.app
+    </div>
+    <p>Then launch it normally from Applications or Spotlight.</p>
 
     <div style="margin-top: 4rem; padding-top: 2rem; border-top: 1px solid var(--border-subtle); text-align: center;">
       <p style="color: var(--text-muted); font-size: 0.85rem;">
