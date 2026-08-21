@@ -75,6 +75,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # TEMPORARY diagnostic — v0.3.8's actual shipped binary (built with
+      # zero caching involved) was found via strings/grep on the real
+      # downloaded release artifact to contain neither the production
+      # Convex URL nor the dev-fallback constant, which caching couldn't
+      # explain. This checks whether the `vars.CONVEX_URL` repo variable
+      # itself is actually reaching this job at all before chasing any more
+      # compile-time theories. Remove once diagnosed.
+      - name: Debug CONVEX_URL
+        run: |
+          echo "::error::CONVEX_URL length=${#CONVEX_URL} prefix=${CONVEX_URL:0:24}"
+          exit 1
+        env:
+          CONVEX_URL: ${{ vars.CONVEX_URL }}
+
       - name: Install Linux system dependencies
         if: matrix.platform == 'ubuntu-latest'
         run: |
