@@ -84,7 +84,23 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
-      - uses: Swatinem/rust-cache@v2
+
+      # Deliberately NOT using Swatinem/rust-cache here (unlike ci.yml) —
+      # CONVEX_URL is baked into the binary at compile time via
+      # option_env!() in state.rs, which Cargo only re-embeds when it
+      # decides to recompile that file. cargo:rerun-if-env-changed in
+      # build.rs is supposed to force that whenever the var's value
+      # changes, but a real shipped v0.3.7 binary was found (via `strings`/
+      # raw grep on the actual downloaded release artifact) to contain
+      # *neither* the production Convex URL *nor* even the dev-fallback
+      # constant — meaning state.rs was never actually recompiled fresh
+      # since before that fix landed, despite it working correctly in an
+      # isolated local test. Rather than keep trying to fully audit how
+      # rust-cache's artifact restore interacts with Cargo's own fingerprint
+      # tracking, every release build now compiles from a guaranteed-clean
+      # slate. Slower (a few extra minutes per platform), but release builds
+      # run rarely (once per version bump) and correctness of what ships to
+      # users matters more here than build speed.
 
       - uses: pnpm/action-setup@v4
         with:
