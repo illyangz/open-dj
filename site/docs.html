@@ -519,6 +519,9 @@
     </div>
     <p>Then launch it normally from Applications or Spotlight.</p>
 
+    <h3 id="ytdlp-team-id">Downloads fail with "Failed to load Python shared library" / "different Team IDs"</h3>
+    <p>Fixed in <strong>v0.3.12</strong>. Earlier builds enabled macOS Hardened Runtime on the whole app bundle, which blocked the bundled yt-dlp binary from loading its own embedded Python runtime (a code-signing Team ID mismatch between yt-dlp and its bundled framework). <a href="index.html#cta">Update to the latest version</a> to fix it &mdash; no other workaround needed.</p>
+
     <div style="margin-top: 4rem; padding-top: 2rem; border-top: 1px solid var(--border-subtle); text-align: center;">
       <p style="color: var(--text-muted); font-size: 0.85rem;">
         Can't find what you need? <a href="https://github.com/illyangz/open-dj/issues" target="_blank">Open an issue on GitHub</a>.
