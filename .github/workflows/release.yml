@@ -184,13 +184,35 @@ jobs:
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path apps/desktop/src-tauri/binaries
-          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile ffmpeg.zip
-          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg-extract
-          $ffmpegExe = Get-ChildItem -Recurse -Path ffmpeg-extract -Filter ffmpeg.exe | Select-Object -First 1
-          Copy-Item $ffmpegExe.FullName apps/desktop/src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe
-          Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/download/$env:YTDLP_VERSION/yt-dlp.exe" `
-            -OutFile apps/desktop/src-tauri/binaries/yt-dlp-x86_64-pc-windows-msvc.exe
+          # $ProgressPreference: Invoke-WebRequest's default progress-bar
+          # rendering is a well-known source of extreme slowness (sometimes
+          # outright failure) in non-interactive CI shells — silencing it
+          # is the standard fix. $ErrorActionPreference + try/catch surface
+          # the *actual* exception message via ::error:: instead of GitHub
+          # Actions' generic "Process completed with exit code 1", which
+          # gave no usable detail for whatever failed here originally.
+          $ProgressPreference = 'SilentlyContinue'
+          $ErrorActionPreference = 'Stop'
+          # BtbN/FFmpeg-Builds on GitHub's own release-asset CDN, not
+          # gyan.dev — a real v0.3.9 release build hit a 503 from gyan.dev
+          # ("resource limitation" — a small personal site under load), a
+          # single point of failure this repo's CI doesn't need to depend
+          # on. "latest" tag + this exact filename stay stable release to
+          # release, matching the "fixed name, no version bookkeeping"
+          # property the gyan.dev URL had.
+          try {
+            New-Item -ItemType Directory -Force -Path apps/desktop/src-tauri/binaries | Out-Null
+            Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile ffmpeg.zip
+            Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg-extract
+            $ffmpegExe = Get-ChildItem -Recurse -Path ffmpeg-extract -Filter ffmpeg.exe | Select-Object -First 1
+            if (-not $ffmpegExe) { throw "no ffmpeg.exe found under ffmpeg-extract after Expand-Archive" }
+            Copy-Item $ffmpegExe.FullName apps/desktop/src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe
+            Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/download/$env:YTDLP_VERSION/yt-dlp.exe" `
+              -OutFile apps/desktop/src-tauri/binaries/yt-dlp-x86_64-pc-windows-msvc.exe
+          } catch {
+            Write-Host "::error::Stage ffmpeg + yt-dlp (Windows) failed: $($_.Exception.Message)"
+            exit 1
+          }
 
       # TAURI_SIGNING_PRIVATE_KEY (and, if the key was generated with a
       # password, TAURI_SIGNING_PRIVATE_KEY_PASSWORD) must be set as repo
