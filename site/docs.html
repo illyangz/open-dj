@@ -287,6 +287,7 @@
     <h2 id="installation">Installation</h2>
 
     <h3>macOS (recommended)</h3>
+    <p id="apple-silicon"><strong>Requires Apple Silicon</strong> (an M-series Mac, 2020 or later) — there's no Intel build. Stem separation depends on ONNX Runtime, which doesn't ship a prebuilt binary for Intel Macs, so an Intel-compatible build isn't currently possible without dropping that feature entirely. Running the .dmg on an Intel Mac will fail to launch; there's no workaround short of Apple Silicon hardware.</p>
     <p>OpenDJ isn't Apple-notarized yet (that requires a paid Developer account), so a plain browser download of the <code>.dmg</code> gets flagged by Gatekeeper as <em>&ldquo;damaged&rdquo;</em> on first launch &mdash; misleading, since nothing is actually corrupt. The install script sidesteps this entirely by fetching and installing the app directly, outside the browser download path that triggers the flag in the first place:</p>
     <div class="cmd-block">
       <span class="prompt">$ </span>curl -fsSL https://illyangz.github.io/open-dj/install.sh | bash
@@ -511,7 +512,7 @@
 
     <h3 id="macos-blocks">macOS says OpenDJ "is damaged and can't be opened"</h3>
     <p>This is Gatekeeper, not an actually corrupt download — OpenDJ isn't Apple-notarized yet, so a fresh browser download gets quarantined and macOS shows this (misleading) message instead of the usual "unidentified developer" prompt. Two ways to fix it:</p>
-    <p><strong>Avoid it next time:</strong> use the <a href="index.html#cta">install script</a> instead of the browser download — it never triggers the flag in the first place.</p>
+    <p><strong>Avoid it next time:</strong> use the <a href="index.html#cta">install script</a> instead of the browser download — it clears the quarantine flag as part of installing, so the dialog never shows.</p>
     <p><strong>Already hit it?</strong> Fix it once per download from Terminal, after dragging OpenDJ.app to Applications:</p>
     <div class="cmd-block">
       <span class="prompt">$ </span>xattr -cr /Applications/OpenDJ.app

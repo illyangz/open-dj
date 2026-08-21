@@ -1,6 +1,6 @@
 [package]
 name = "desktop"
-version = "0.3.10"
+version = "0.3.11"
 description = "OpenDJ — a local-first DJ music preparation workspace"
 authors = ["OpenDJ contributors"]
 edition = "2021"
