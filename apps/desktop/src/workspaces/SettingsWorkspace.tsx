@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "../lib/api";
 import { useAppStore } from "../store/useAppStore";
-import type { Settings, SystemToolsStatus } from "../types";
+import type { KeyColorMode, Settings, SystemToolsStatus } from "../types";
 
 /** FR-060–FR-064: storage/quality/concurrency/privacy configuration, plus
  * system tools status (yt-dlp + ffmpeg). */
@@ -111,6 +111,31 @@ export function SettingsWorkspace() {
             onChange={(v) => update({ concurrency_file_mutation: v })}
           />
         </FieldRow>
+      </Section>
+
+      <Section title="Display">
+        <FieldRow label="Key color mode">
+          <div className="flex items-center gap-1 rounded-full border border-charcoal-700 p-0.5">
+            {(["none", "serato", "rekordbox"] as KeyColorMode[]).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => update({ key_color_mode: mode })}
+                className={[
+                  "px-2.5 py-1 rounded-full text-xs font-medium transition-colors",
+                  settings.key_color_mode === mode
+                    ? "bg-signal text-charcoal-950"
+                    : "text-parchment-dim hover:text-parchment",
+                ].join(" ")}
+              >
+                {mode === "none" ? "None" : mode === "serato" ? "Serato" : "Rekordbox"}
+              </button>
+            ))}
+          </div>
+        </FieldRow>
+        <p className="text-xs text-parchment-dim mt-1">
+          Serato: fixed background color per Camelot key. Rekordbox: harmonically compatible keys
+          highlight green against the currently playing track. None: default sky blue.
+        </p>
       </Section>
 
       <Section title="System tools">
