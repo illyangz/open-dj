@@ -109,7 +109,6 @@ pub fn run() {
             commands::update_settings,
             commands::check_system_tools,
             commands::fetch_soundcloud_likes,
-            commands::download_soundcloud_track,
             commands::export_diagnostics,
             sync_commands::ensure_device_identity,
             sync_commands::import_device_identity,

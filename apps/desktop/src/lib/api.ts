@@ -124,8 +124,6 @@ export const api = {
 
   fetchSoundcloudLikes: (username: string) =>
     invoke<ScTrack[]>("fetch_soundcloud_likes", { username }),
-  downloadSoundcloudTrack: (scTrack: ScTrack) =>
-    invoke<string>("download_soundcloud_track", { scTrack }),
 
   exportDiagnostics: () => invoke<Diagnostics>("export_diagnostics"),
 };

@@ -1,12 +1,54 @@
 import { create } from "zustand";
 import { api, onQueueUpdated } from "../lib/api";
-import type { Job, ProviderInfo, Settings, WorkspaceId } from "../types";
+import type { Job, ProviderInfo, ScTrack, Settings, WorkspaceId } from "../types";
 
 const ZOOM_STORAGE_KEY = "opendj.zoomPercent";
 
 function readStoredZoom(): number {
   const raw = Number(localStorage.getItem(ZOOM_STORAGE_KEY));
   return raw >= 70 && raw <= 150 ? raw : 100;
+}
+
+// Cache the last SoundCloud lookup (username + results) across reloads/
+// restarts so reopening the app doesn't force a re-fetch of a likes list
+// that can run into the hundreds of tracks. This is a convenience cache,
+// not a database — a new successful search just overwrites it. Living
+// state (in-flight fetch, queued downloads) is kept in the store below so
+// switching workspace tabs never interrupts or loses it — only a full
+// app restart falls back to this cache.
+const SC_CACHE_KEY = "opendj:soundcloud:last-lookup";
+
+interface SoundcloudCache {
+  username: string;
+  tracks: ScTrack[];
+}
+
+function loadSoundcloudCache(): SoundcloudCache | null {
+  try {
+    const raw = localStorage.getItem(SC_CACHE_KEY);
+    return raw ? (JSON.parse(raw) as SoundcloudCache) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSoundcloudCache(entry: SoundcloudCache) {
+  try {
+    localStorage.setItem(SC_CACHE_KEY, JSON.stringify(entry));
+  } catch {
+    // Storage full/unavailable — caching is a convenience, not required.
+  }
+}
+
+interface SoundcloudState {
+  username: string;
+  tracks: ScTrack[];
+  loading: boolean;
+  error: string | null;
+  /** SoundCloud track id -> the queue Job id it was enqueued as, so the
+   * SoundCloud tab can read real download progress/completion straight off
+   * `jobs` instead of tracking its own (easily desynced) copy. */
+  queuedJobIds: Record<number, string>;
 }
 
 interface AppStore {
@@ -29,6 +71,17 @@ interface AppStore {
   refreshJobs: () => Promise<void>;
   patchJob: (job: Job) => void;
   removeJobs: (ids: string[]) => Promise<void>;
+  /** Creates jobs for `text` and merges them into `jobs` without switching
+   * workspace — the shared primitive behind `ingest` (paste box, always
+   * jumps to the Queue tab) and SoundCloud downloads (stay put, just show
+   * up in the queue). Merges rather than blindly prepending so a job that
+   * already raced ahead via a `queue-updated` event (fast resolves/
+   * downloads can finish before this call's promise even returns) doesn't
+   * get overwritten by its own stale just-created snapshot — that stale
+   * copy would sit at a different array index than the live one, so the
+   * queue keeps showing a phantom "active" row for a track that already
+   * finished downloading. */
+  enqueue: (text: string) => Promise<Job[]>;
   ingest: (text: string) => Promise<void>;
 
   providers: ProviderInfo[];
@@ -41,6 +94,19 @@ interface AppStore {
 
   initialized: boolean;
   init: () => Promise<void>;
+
+  /** Lives here (not local component state) so a lookup or a batch of
+   * downloads keeps running/showing progress when the user switches away
+   * to another workspace tab and back — the SoundCloud workspace used to
+   * hold all of this in `useState`, which React tears down on unmount. */
+  soundcloud: SoundcloudState;
+  setSoundcloudUsername: (username: string) => void;
+  fetchSoundcloudLikes: () => Promise<void>;
+  /** Downloads a SoundCloud track via the normal ingest/queue pipeline
+   * (ytdlp already handles soundcloud.com URLs) instead of a bespoke
+   * direct-download path, so it actually shows up — and can be retried,
+   * paused, etc — in the Queue tab like every other download. */
+  queueSoundcloudDownload: (track: ScTrack) => Promise<void>;
 }
 
 export const useAppStore = create<AppStore>((set, get) => ({
@@ -86,10 +152,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
       selectedJobId: idSet.has(state.selectedJobId ?? "") ? null : state.selectedJobId,
     }));
   },
-  ingest: async (text: string) => {
+  enqueue: async (text: string) => {
     const created = await api.ingestInputs(text);
+    if (created.length > 0) {
+      set((state) => {
+        const existingIds = new Set(state.jobs.map((j) => j.id));
+        const newOnes = created.filter((j) => !existingIds.has(j.id));
+        return newOnes.length > 0 ? { jobs: [...newOnes, ...state.jobs] } : state;
+      });
+    }
+    return created;
+  },
+  ingest: async (text: string) => {
+    const created = await get().enqueue(text);
     if (created.length === 0) return;
-    set((state) => ({ jobs: [...created, ...state.jobs], selectedJobId: created[0].id, workspace: "queue" }));
+    set({ selectedJobId: created[0].id, workspace: "queue" });
   },
 
   providers: [],
@@ -140,5 +217,58 @@ export const useAppStore = create<AppStore>((set, get) => ({
     await onQueueUpdated((job) => {
       get().patchJob(job);
     });
+  },
+
+  soundcloud: (() => {
+    const cached = loadSoundcloudCache();
+    return {
+      username: cached?.username ?? "",
+      tracks: cached?.tracks ?? [],
+      loading: false,
+      error: null,
+      queuedJobIds: {},
+    };
+  })(),
+  setSoundcloudUsername: (username) =>
+    set((state) => ({ soundcloud: { ...state.soundcloud, username } })),
+  fetchSoundcloudLikes: async () => {
+    const u = get().soundcloud.username.trim().replace(/^@/, "");
+    if (!u) return;
+    set((state) => ({ soundcloud: { ...state.soundcloud, loading: true, error: null } }));
+    try {
+      const tracks = await api.fetchSoundcloudLikes(u);
+      saveSoundcloudCache({ username: u, tracks });
+      set((state) => ({ soundcloud: { ...state.soundcloud, tracks, loading: false } }));
+    } catch (e: any) {
+      set((state) => ({
+        soundcloud: {
+          ...state.soundcloud,
+          error: e?.toString() || "Failed to fetch likes",
+          tracks: [],
+          loading: false,
+        },
+      }));
+    }
+  },
+  queueSoundcloudDownload: async (track: ScTrack) => {
+    try {
+      const created = await get().enqueue(track.url);
+      const jobId = created[0]?.id;
+      if (jobId) {
+        set((state) => ({
+          soundcloud: {
+            ...state.soundcloud,
+            queuedJobIds: { ...state.soundcloud.queuedJobIds, [track.id]: jobId },
+          },
+        }));
+      }
+    } catch (e: any) {
+      set((state) => ({
+        soundcloud: {
+          ...state.soundcloud,
+          error: `Failed to queue "${track.title}": ${e?.toString() || "unknown error"}`,
+        },
+      }));
+    }
   },
 }));
