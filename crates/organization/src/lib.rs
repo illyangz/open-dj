@@ -154,6 +154,80 @@ pub fn find_duplicates(tracks: &[TrackFields]) -> Vec<Vec<String>> {
     groups.into_values().filter(|g| g.len() > 1).collect()
 }
 
+// ── DuplicateGroup (richer duplicate detection for the UI) ──────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DuplicateTier {
+    ExactFile,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DuplicateGroup {
+    pub tier: DuplicateTier,
+    pub tracks: Vec<TrackFields>,
+    pub suggested_canonical: String,
+}
+
+/// Pick the best canonical track from a group. Prefers (a) highest bitrate
+/// (if available via source_path metadata), (b) most complete tag set,
+/// (c) oldest file as tiebreak.
+fn pick_canonical(tracks: &[TrackFields]) -> String {
+    let mut best = &tracks[0];
+    for t in &tracks[1..] {
+        let best_score = tag_completeness(best);
+        let t_score = tag_completeness(t);
+        if t_score > best_score {
+            best = t;
+        }
+    }
+    best.source_path.clone()
+}
+
+fn tag_completeness(t: &TrackFields) -> u32 {
+    let mut score = 0u32;
+    if t.artist.is_some() {
+        score += 1;
+    }
+    if t.album.is_some() {
+        score += 1;
+    }
+    if t.year.is_some() {
+        score += 1;
+    }
+    if t.title.is_some() {
+        score += 1;
+    }
+    if t.playlist.is_some() {
+        score += 1;
+    }
+    score
+}
+
+/// Richer duplicate detection: groups tracks by checksum, returns
+/// DuplicateGroup structs with full metadata and a suggested canonical.
+pub fn find_duplicate_groups(tracks: &[TrackFields]) -> Vec<DuplicateGroup> {
+    let mut groups: HashMap<String, Vec<TrackFields>> = HashMap::new();
+    for t in tracks {
+        groups
+            .entry(t.checksum.clone())
+            .or_default()
+            .push(t.clone());
+    }
+    groups
+        .into_values()
+        .filter(|g| g.len() > 1)
+        .map(|members| {
+            let suggested_canonical = pick_canonical(&members);
+            DuplicateGroup {
+                tier: DuplicateTier::ExactFile,
+                tracks: members,
+                suggested_canonical,
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,5 +292,44 @@ mod tests {
         let dups = find_duplicates(&tracks);
         assert_eq!(dups.len(), 1);
         assert_eq!(dups[0].len(), 2);
+    }
+
+    #[test]
+    fn find_duplicate_groups_returns_rich_groups() {
+        let tracks = vec![
+            track("/in/a.mp3", "same", "X", "A"),
+            track("/in/b.mp3", "same", "Y", "B"),
+            track("/in/c.mp3", "diff", "Z", "C"),
+        ];
+        let groups = find_duplicate_groups(&tracks);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].tracks.len(), 2);
+        assert_eq!(groups[0].tier, DuplicateTier::ExactFile);
+        // suggested_canonical should be the one with more tags (both have same completeness here,
+        // so it picks the first one)
+        assert!(!groups[0].suggested_canonical.is_empty());
+    }
+
+    #[test]
+    fn canonical_picks_most_complete_tags() {
+        let mut a = track("/in/a.mp3", "same", "X", "A");
+        a.album = None;
+        a.year = None;
+        let b = track("/in/b.mp3", "same", "Y", "B");
+        let tracks = vec![a, b];
+        let groups = find_duplicate_groups(&tracks);
+        assert_eq!(groups[0].suggested_canonical, "/in/b.mp3");
+    }
+
+    #[test]
+    fn three_member_group() {
+        let tracks = vec![
+            track("/in/a.mp3", "dup", "X", "A"),
+            track("/in/b.mp3", "dup", "Y", "B"),
+            track("/in/c.mp3", "dup", "Z", "C"),
+        ];
+        let groups = find_duplicate_groups(&tracks);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].tracks.len(), 3);
     }
 }

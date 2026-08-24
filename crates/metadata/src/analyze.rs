@@ -3,7 +3,9 @@
 //! (which is most fresh downloads).
 
 use crate::{keyfinder_bridge, MetadataError, Result};
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error as SymphoniaError;
@@ -34,7 +36,10 @@ pub struct TrackAnalysis {
 /// machine; see `crates/keyfinder-bridge` for why that's a soft fallback
 /// rather than a hard requirement.
 pub fn analyze_track(path: &Path) -> Result<TrackAnalysis> {
-    let decoded = decode(path)?;
+    // Only decode the first 30 seconds — BPM and key detection don't need
+    // the full file. This cuts decode time from seconds to milliseconds.
+    const SAMPLES_FOR_ANALYSIS: usize = 30 * 44100; // 30s at 44.1kHz
+    let decoded = decode_limited(path, Some(SAMPLES_FOR_ANALYSIS))?;
 
     let result = stratum_dsp::analyze_audio(
         &decoded.mono_samples,
@@ -66,12 +71,72 @@ pub(crate) struct DecodedAudio {
     pub(crate) mono_samples: Vec<f32>,
     /// Original channel layout, interleaved — what libkeyfinder expects
     /// (it does its own, more careful channel reduction internally).
-    interleaved_samples: Vec<f32>,
-    channels: u32,
+    pub(crate) interleaved_samples: Vec<f32>,
+    pub(crate) channels: u32,
     pub(crate) sample_rate: u32,
 }
 
+/// Cache for decoded audio — avoids decoding the same file twice when
+/// both BPM/key analysis and waveform rendering run concurrently.
+/// Keyed by canonicalized file path. Limited to 3 entries to cap memory
+/// (~600MB worst case for stereo 44.1kHz tracks).
+#[allow(dead_code)]
+fn decoded_cache() -> &'static Mutex<HashMap<String, DecodedAudio>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, DecodedAudio>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Try to get a cached decoded audio for this path, or decode and cache it.
+/// If the cache is full, evicts the oldest entry.
+#[allow(dead_code)]
+pub(crate) fn decode_cached(path: &Path) -> Result<DecodedAudio> {
+    let key = path.to_string_lossy().to_string();
+
+    // Fast path: check cache
+    {
+        let cache = decoded_cache().lock().map_err(|e| MetadataError::Analysis(e.to_string()))?;
+        if let Some(cached) = cache.get(&key) {
+            return Ok(DecodedAudio {
+                mono_samples: cached.mono_samples.clone(),
+                interleaved_samples: cached.interleaved_samples.clone(),
+                channels: cached.channels,
+                sample_rate: cached.sample_rate,
+            });
+        }
+    }
+
+    // Slow path: decode from disk
+    let decoded = decode(path)?;
+
+    // Cache the result (evict oldest if full)
+    {
+        let mut cache = decoded_cache().lock().map_err(|e| MetadataError::Analysis(e.to_string()))?;
+        if cache.len() >= 3 {
+            // Remove the first (oldest) entry
+            if let Some(first_key) = cache.keys().next().cloned() {
+                cache.remove(&first_key);
+            }
+        }
+        cache.insert(key, DecodedAudio {
+            mono_samples: decoded.mono_samples.clone(),
+            interleaved_samples: decoded.interleaved_samples.clone(),
+            channels: decoded.channels,
+            sample_rate: decoded.sample_rate,
+        });
+    }
+
+    Ok(decoded)
+}
+
 pub(crate) fn decode(path: &Path) -> Result<DecodedAudio> {
+    decode_limited(path, None)
+}
+
+/// Decode `path` with an optional sample limit. When `max_samples` is
+/// `Some(n)`, stops reading after `n` mono samples (~n/sample_rate seconds).
+/// This cuts analysis time dramatically for BPM/key detection which only
+/// needs the first 30-60 seconds of audio.
+pub(crate) fn decode_limited(path: &Path, max_samples: Option<usize>) -> Result<DecodedAudio> {
     let src = std::fs::File::open(path).map_err(|e| MetadataError::Analysis(e.to_string()))?;
     let mss = MediaSourceStream::new(Box::new(src), Default::default());
 
@@ -101,13 +166,23 @@ pub(crate) fn decode(path: &Path) -> Result<DecodedAudio> {
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|e| MetadataError::Analysis(format!("unsupported codec: {e}")))?;
 
-    let mut mono_samples: Vec<f32> = Vec::new();
-    let mut interleaved_samples: Vec<f32> = Vec::new();
+    // Pre-allocate for ~60 seconds at 44.1kHz (2,646,000 samples) when no limit.
+    // With a limit, pre-allocate exactly.
+    let initial_cap = max_samples.unwrap_or(2_646_000);
+    let mut mono_samples: Vec<f32> = Vec::with_capacity(initial_cap);
+    let mut interleaved_samples: Vec<f32> = Vec::with_capacity(initial_cap * 2);
     let mut channels: u32 = 1;
     let mut sample_rate: u32 = 44100;
     let mut sample_buf: Option<SampleBuffer<f32>> = None;
 
     loop {
+        // Early exit: we have enough samples
+        if let Some(limit) = max_samples {
+            if mono_samples.len() >= limit {
+                break;
+            }
+        }
+
         let packet = match format.next_packet() {
             Ok(packet) => packet,
             Err(SymphoniaError::ResetRequired) => break,

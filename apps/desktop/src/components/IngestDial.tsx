@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "../store/useAppStore";
+import { DOWNLOAD_FORMATS, type DownloadFormat } from "../types";
 import { DropIcon } from "./icons";
 
 function hasSpotifyUrl(text: string): boolean {
@@ -20,6 +21,8 @@ export function IngestDial() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const ingest = useAppStore((s) => s.ingest);
   const setWorkspace = useAppStore((s) => s.setWorkspace);
+  const selectedFormat = useAppStore((s) => s.selectedFormat);
+  const setSelectedFormat = useAppStore((s) => s.setSelectedFormat);
 
   useEffect(() => {
     const unlisten = getCurrentWebview().onDragDropEvent((event) => {
@@ -106,6 +109,21 @@ export function IngestDial() {
             Spotify links: audio will be sourced from YouTube — quality varies by track availability.
           </p>
         )}
+
+        <div className="flex items-center gap-2">
+          <label className="text-[11px] text-parchment-dim">Format:</label>
+          <select
+            value={selectedFormat}
+            onChange={(e) => setSelectedFormat(e.target.value as DownloadFormat)}
+            className="bg-charcoal-900 border border-charcoal-700 rounded-md px-2 py-1 text-xs text-parchment focus:outline-none focus:border-teal/60"
+          >
+            {DOWNLOAD_FORMATS.map((f) => (
+              <option key={f.value} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        </div>
 
         <div className="flex items-center gap-2">
           <button

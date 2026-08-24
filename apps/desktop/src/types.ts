@@ -122,6 +122,8 @@ export interface MutationJournal {
 
 export type WaveformColorMode = "rgb" | "three-band" | "classic-blue";
 
+export type KeyColorMode = "serato" | "rekordbox" | "none";
+
 export interface WaveformCustomColors {
   low: string;
   mid: string;
@@ -143,6 +145,8 @@ export interface Settings {
   device_secret: string;
   username: string;
   sync_enabled: boolean;
+  default_output_format: DownloadFormat;
+  key_color_mode: KeyColorMode;
 }
 
 export interface TrackFields {
@@ -287,3 +291,37 @@ export type WorkspaceId =
   | "community"
   | "automations"
   | "settings";
+
+export type DownloadFormat = "mp3" | "flac" | "wav" | "aac" | "ogg" | "aiff";
+
+export const DOWNLOAD_FORMATS: { value: DownloadFormat; label: string }[] = [
+  { value: "mp3", label: "MP3 (320kbps)" },
+  { value: "flac", label: "FLAC (Lossless)" },
+  { value: "wav", label: "WAV (Lossless)" },
+  { value: "aac", label: "AAC (256kbps)" },
+  { value: "ogg", label: "OGG Vorbis" },
+  { value: "aiff", label: "AIFF (Lossless)" },
+];
+
+export type DuplicateTier = "exact_file";
+
+export interface DuplicateGroup {
+  tier: DuplicateTier;
+  tracks: TrackFields[];
+  suggested_canonical: string;
+}
+
+export interface PlayerTrack {
+  jobId: string;
+  title: string | null;
+  artist: string | null;
+  destination: string;
+  durationSec: number | null;
+}
+
+export interface PlayerState {
+  current: PlayerTrack | null;
+  isPlaying: boolean;
+  position: number;
+  contextQueue: PlayerTrack[];
+}

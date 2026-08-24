@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { api } from "../lib/api";
 import { useTrackAnalysis, type TrackAnalysisState } from "../lib/useTrackAnalysis";
 import { useAppStore } from "../store/useAppStore";
@@ -36,35 +35,72 @@ function formatTime(seconds: number): string {
 export function SortWorkspace() {
   const jobs = useAppStore((s) => s.jobs);
   const zoomPercent = useAppStore((s) => s.zoomPercent);
-  const downloads = useMemo(
-    () => jobs.filter((j) => j.state === "complete" && j.destination),
-    [jobs],
-  );
+  // Dedup completed jobs by destination (multiple downloads of same track)
+  const downloads = useMemo(() => {
+    const completed = jobs.filter((j) => j.state === "complete" && j.destination);
+    const byDest = new Map<string, typeof completed[0]>();
+    for (const j of completed) {
+      const existing = byDest.get(j.destination!);
+      if (!existing || j.updated_at > existing.updated_at) {
+        byDest.set(j.destination!, j);
+      }
+    }
+    return [...byDest.values()];
+  }, [jobs]);
 
-  // Each track's BPM/key/duration is resolved by a hidden worker instance
-  // (below) and lifted here by job id — the visible, grouped rows are pure
-  // presentation over this map, so grouping/sorting only has to happen in
-  // one place instead of re-deriving it inside N hook-bearing rows.
   const [analysisById, setAnalysisById] = useState<Record<string, TrackAnalysisState>>({});
+  const [sortMode, setSortMode] = useState<"camelot" | "bpm">("camelot");
 
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [playingId, setPlayingId] = useState<string | null>(null);
+  // Global player
+  const playTrack = useAppStore((s) => s.playTrack);
+  const togglePlayGlobal = useAppStore((s) => s.togglePlay);
+  const playerCurrent = useAppStore((s) => s.player.current);
+  const playingId = playerCurrent?.jobId ?? null;
 
   function togglePlay(job: Job) {
     if (!job.destination) return;
-    const audio = audioRef.current;
-    if (!audio) return;
     if (playingId === job.id) {
-      audio.pause();
-      setPlayingId(null);
-      return;
+      togglePlayGlobal();
+    } else {
+      const queue = downloads.map((d) => ({
+        jobId: d.id,
+        title: d.title,
+        artist: d.artist,
+        destination: d.destination!,
+        durationSec: null,
+      }));
+      playTrack(
+        {
+          jobId: job.id,
+          title: job.title,
+          artist: job.artist,
+          destination: job.destination,
+          durationSec: null,
+        },
+        queue,
+      );
     }
-    audio.src = convertFileSrc(job.destination);
-    void audio.play();
-    setPlayingId(job.id);
   }
 
-  const groups = useMemo(() => {
+  type Groups = {
+    sortedKeys: string[];
+    buckets: Map<string, { job: Job; analysis: TrackAnalysisState }[]>;
+    unsorted: { job: Job; analysis: TrackAnalysisState }[];
+    flatSorted: { job: Job; analysis: TrackAnalysisState }[];
+  };
+
+  const groups = useMemo<Groups>(() => {
+    if (sortMode === "bpm") {
+      // Flat list sorted by BPM
+      const withBpm = downloads.map((job) => ({
+        job,
+        analysis: analysisById[job.id] ?? { bpm: null, key: null, durationSec: 0, analyzing: true },
+      }));
+      withBpm.sort((a, b) => (a.analysis.bpm ?? 0) - (b.analysis.bpm ?? 0));
+      return { sortedKeys: [] as string[], buckets: new Map<string, { job: Job; analysis: TrackAnalysisState }[]>(), unsorted: withBpm, flatSorted: withBpm };
+    }
+
+    // Camelot mode (default)
     const buckets = new Map<string, { job: Job; analysis: TrackAnalysisState }[]>();
     const unsorted: { job: Job; analysis: TrackAnalysisState }[] = [];
 
@@ -91,8 +127,8 @@ export function SortWorkspace() {
       return pa.num - pb.num || pa.letter.localeCompare(pb.letter);
     });
 
-    return { sortedKeys, buckets, unsorted };
-  }, [downloads, analysisById]);
+    return { sortedKeys, buckets, unsorted, flatSorted: [] as { job: Job; analysis: TrackAnalysisState }[] };
+  }, [downloads, analysisById, sortMode]);
 
   return (
     <div className="flex-1 min-w-0 overflow-y-auto p-6" style={{ zoom: `${zoomPercent}%` }}>
@@ -105,6 +141,28 @@ export function SortWorkspace() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1 rounded-full border border-charcoal-700 p-0.5">
+            <button
+              onClick={() => setSortMode("camelot")}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                sortMode === "camelot"
+                  ? "bg-signal text-charcoal-950"
+                  : "text-parchment-dim hover:text-parchment"
+              }`}
+            >
+              By Key
+            </button>
+            <button
+              onClick={() => setSortMode("bpm")}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                sortMode === "bpm"
+                  ? "bg-signal text-charcoal-950"
+                  : "text-parchment-dim hover:text-parchment"
+              }`}
+            >
+              By BPM
+            </button>
+          </div>
           <ZoomControl />
           <ExportButtons downloads={downloads} analysisById={analysisById} />
         </div>
@@ -125,35 +183,13 @@ export function SortWorkspace() {
         </div>
       ) : (
         <div className="mt-6 w-full max-w-[1600px] space-y-6">
-          {groups.sortedKeys.map((key) => (
-            <div key={key}>
-              <h2 className="text-xs font-mono uppercase tracking-wide text-signal/80 mb-1.5">
-                {key} <span className="text-parchment-dim/60">· {groups.buckets.get(key)!.length} track(s)</span>
-              </h2>
-              <ul className="space-y-1.5">
-                {groups.buckets.get(key)!.map(({ job, analysis }) => (
-                  <TrackRow
-                    key={job.id}
-                    job={job}
-                    analysis={analysis}
-                    playing={playingId === job.id}
-                    onTogglePlay={() => togglePlay(job)}
-                  />
-                ))}
-              </ul>
-            </div>
-          ))}
-
-          {groups.unsorted.length > 0 && (
+          {sortMode === "bpm" ? (
             <div>
-              <h2 className="text-xs font-mono uppercase tracking-wide text-parchment-dim/60 mb-1.5">
-                Unsorted <span>· {groups.unsorted.length} track(s)</span>
+              <h2 className="text-xs font-mono uppercase tracking-wide text-signal/80 mb-1.5">
+                All tracks sorted by BPM
               </h2>
-              <p className="text-[11px] text-parchment-dim/60 mb-1.5">
-                No confident key detected — can't be placed on the Camelot wheel yet.
-              </p>
               <ul className="space-y-1.5">
-                {groups.unsorted.map(({ job, analysis }) => (
+                {groups.flatSorted.map(({ job, analysis }) => (
                   <TrackRow
                     key={job.id}
                     job={job}
@@ -164,11 +200,52 @@ export function SortWorkspace() {
                 ))}
               </ul>
             </div>
+          ) : (
+            <>
+              {groups.sortedKeys.map((key) => (
+                <div key={key}>
+                  <h2 className="text-xs font-mono uppercase tracking-wide text-signal/80 mb-1.5">
+                    {key} <span className="text-parchment-dim/60">· {groups.buckets.get(key)!.length} track(s)</span>
+                  </h2>
+                  <ul className="space-y-1.5">
+                    {groups.buckets.get(key)!.map(({ job, analysis }) => (
+                      <TrackRow
+                        key={job.id}
+                        job={job}
+                        analysis={analysis}
+                        playing={playingId === job.id}
+                        onTogglePlay={() => togglePlay(job)}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              ))}
+
+              {groups.unsorted.length > 0 && (
+                <div>
+                  <h2 className="text-xs font-mono uppercase tracking-wide text-parchment-dim/60 mb-1.5">
+                    Unsorted <span>· {groups.unsorted.length} track(s)</span>
+                  </h2>
+                  <p className="text-[11px] text-parchment-dim/60 mb-1.5">
+                    No confident key detected — can't be placed on the Camelot wheel yet.
+                  </p>
+                  <ul className="space-y-1.5">
+                    {groups.unsorted.map(({ job, analysis }) => (
+                      <TrackRow
+                        key={job.id}
+                        job={job}
+                        analysis={analysis}
+                        playing={playingId === job.id}
+                        onTogglePlay={() => togglePlay(job)}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
-
-      <audio ref={audioRef} onEnded={() => setPlayingId(null)} className="hidden" />
     </div>
   );
 }

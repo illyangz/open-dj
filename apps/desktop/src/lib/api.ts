@@ -8,6 +8,7 @@ import type {
   Crate,
   CuePoint,
   Diagnostics,
+  DuplicateGroup,
   FileScan,
   Job,
   MutationJournal,
@@ -28,7 +29,8 @@ import type {
 } from "../types";
 
 export const api = {
-  ingestInputs: (text: string) => invoke<Job[]>("ingest_inputs", { text }),
+  ingestInputs: (text: string, format?: string) =>
+    invoke<Job[]>("ingest_inputs", { text, format: format ?? null }),
   listJobs: () => invoke<Job[]>("list_jobs"),
   pauseJob: (id: string) => invoke<Job>("pause_job", { id }),
   resumeJob: (id: string) => invoke<Job>("resume_job", { id }),
@@ -126,6 +128,15 @@ export const api = {
     invoke<ScTrack[]>("fetch_soundcloud_likes", { username }),
 
   exportDiagnostics: () => invoke<Diagnostics>("export_diagnostics"),
+
+  removeFromLibrary: (path: string) => invoke<void>("remove_from_library", { path }),
+  findDuplicateGroups: (tracks: TrackFields[]) =>
+    invoke<DuplicateGroup[]>("find_duplicate_groups", { tracks }),
+  mergeDuplicateGroup: (canonicalPath: string, redundantPaths: string[]) =>
+    invoke<MutationRecord[]>("merge_duplicate_group", {
+      canonicalPath,
+      redundantPaths,
+    }),
 };
 
 /** FR-010: subscribe to per-job state changes emitted by the Rust job

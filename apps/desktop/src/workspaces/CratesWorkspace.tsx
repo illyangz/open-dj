@@ -3,6 +3,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { api } from "../lib/api";
 import { useAppStore } from "../store/useAppStore";
 import { useTrackAnalysis } from "../lib/useTrackAnalysis";
+import { KeyBadge } from "../components/KeyBadge";
 import { ZoomControl } from "../components/ZoomControl";
 import type { Crate, CuePoint, Job } from "../types";
 
@@ -57,6 +58,7 @@ export function CratesWorkspace() {
   const [newCrateName, setNewCrateName] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
+  const [crateSortMode, setCrateSortMode] = useState<"manual" | "bpm" | "key">("manual");
 
   useEffect(() => {
     api.listCrates().then((result) => {
@@ -78,6 +80,24 @@ export function CratesWorkspace() {
   }, [selectedId]);
 
   const selected = crates.find((c) => c.id === selectedId) ?? null;
+
+  // Analysis data for sorting
+  const [analysisByPath, setAnalysisByPath] = useState<Record<string, { bpm: number | null; key: string | null }>>({});
+
+  const sortedTrackPaths = useMemo(() => {
+    if (crateSortMode === "manual") return trackPaths;
+    const withAnalysis = trackPaths.map((path) => ({
+      path,
+      bpm: analysisByPath[path]?.bpm ?? null,
+      key: analysisByPath[path]?.key ?? null,
+    }));
+    if (crateSortMode === "bpm") {
+      withAnalysis.sort((a, b) => (a.bpm ?? 0) - (b.bpm ?? 0));
+    } else if (crateSortMode === "key") {
+      withAnalysis.sort((a, b) => (a.key ?? "zzz").localeCompare(b.key ?? "zzz"));
+    }
+    return withAnalysis.map((t) => t.path);
+  }, [trackPaths, analysisByPath, crateSortMode]);
 
   async function createCrate() {
     const name = newCrateName.trim();
@@ -210,6 +230,38 @@ export function CratesWorkspace() {
                 </h1>
               )}
               <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-1 rounded-full border border-charcoal-700 p-0.5">
+                  <button
+                    onClick={() => setCrateSortMode("manual")}
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors ${
+                      crateSortMode === "manual"
+                        ? "bg-signal text-charcoal-950"
+                        : "text-parchment-dim hover:text-parchment"
+                    }`}
+                  >
+                    Manual
+                  </button>
+                  <button
+                    onClick={() => setCrateSortMode("bpm")}
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors ${
+                      crateSortMode === "bpm"
+                        ? "bg-signal text-charcoal-950"
+                        : "text-parchment-dim hover:text-parchment"
+                    }`}
+                  >
+                    BPM
+                  </button>
+                  <button
+                    onClick={() => setCrateSortMode("key")}
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors ${
+                      crateSortMode === "key"
+                        ? "bg-signal text-charcoal-950"
+                        : "text-parchment-dim hover:text-parchment"
+                    }`}
+                  >
+                    Key
+                  </button>
+                </div>
                 <ZoomControl />
                 <button
                   onClick={() => void exportSeratoCrate()}
@@ -235,13 +287,21 @@ export function CratesWorkspace() {
             </div>
 
             <ul className="mt-4 w-full max-w-[1600px] space-y-1.5">
-              {trackPaths.map((path, i) => (
+              {/* Hidden analysis workers for sort modes */}
+              {crateSortMode !== "manual" && trackPaths.map((path) => (
+                <CrateAnalysisWorker
+                  key={`analysis-${path}`}
+                  path={path}
+                  onResolved={(a) => setAnalysisByPath((prev) => ({ ...prev, [path]: a }))}
+                />
+              ))}
+              {(crateSortMode === "manual" ? trackPaths : sortedTrackPaths).map((path, i) => (
                 <CrateTrackRow
                   key={path}
                   path={path}
                   job={jobByPath.get(path)}
-                  onMoveUp={i > 0 ? () => void move(i, -1) : undefined}
-                  onMoveDown={i < trackPaths.length - 1 ? () => void move(i, 1) : undefined}
+                  onMoveUp={crateSortMode === "manual" && i > 0 ? () => void move(i, -1) : undefined}
+                  onMoveDown={crateSortMode === "manual" && i < trackPaths.length - 1 ? () => void move(i, 1) : undefined}
                   onRemove={() => void removeTrack(path)}
                 />
               ))}
@@ -288,7 +348,7 @@ function CrateTrackRow({
           </span>
         )}
         {key && (
-          <span className="text-[10px] text-sky-400/70 bg-sky-400/10 px-1.5 py-0.5 rounded">{key}</span>
+          <KeyBadge key_={key} />
         )}
         <button
           onClick={onMoveUp}
@@ -316,6 +376,20 @@ function CrateTrackRow({
       </div>
     </li>
   );
+}
+
+function CrateAnalysisWorker({
+  path,
+  onResolved,
+}: {
+  path: string;
+  onResolved: (a: { bpm: number | null; key: string | null }) => void;
+}) {
+  const { bpm, key } = useTrackAnalysis(path);
+  useEffect(() => {
+    onResolved({ bpm, key });
+  }, [bpm, key, onResolved]);
+  return null;
 }
 
 /** Builds a Rekordbox-importable DJ_PLAYLISTS XML for one crate: a

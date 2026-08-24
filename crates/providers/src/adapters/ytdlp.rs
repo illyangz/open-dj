@@ -267,6 +267,7 @@ impl YtdlpAdapter {
         &self,
         candidate: &TrackCandidate,
         dest_dir: &Path,
+        format: &str,
     ) -> Result<PathBuf> {
         let client_id = self.detect_sc_client_id().await?;
 
@@ -362,7 +363,7 @@ impl YtdlpAdapter {
             fresh.title
         );
         let file_name = sanitize_filename(&safe_name);
-        let dest_path = dest_dir.join(format!("{file_name}.mp3"));
+        let dest_path = dest_dir.join(format!("{file_name}.{format}"));
         tokio::fs::write(&dest_path, &bytes).await?;
 
         Ok(dest_path)
@@ -709,12 +710,12 @@ impl ProviderAdapter for YtdlpAdapter {
         Ok(vec![info.into_candidate(raw, false)])
     }
 
-    async fn fetch(&self, candidate: &TrackCandidate, dest_dir: &Path) -> Result<PathBuf> {
+    async fn fetch(&self, candidate: &TrackCandidate, dest_dir: &Path, format: &str) -> Result<PathBuf> {
         tokio::fs::create_dir_all(dest_dir).await?;
 
         // SoundCloud: direct API download (clean, no yt-dlp)
         if candidate.provider == "soundcloud" || Self::is_soundcloud_url(&candidate.source_url) {
-            return self.fetch_soundcloud(candidate, dest_dir).await;
+            return self.fetch_soundcloud(candidate, dest_dir, format).await;
         }
 
         // Everything else: yt-dlp with format 18 fallback
@@ -746,13 +747,21 @@ impl ProviderAdapter for YtdlpAdapter {
         let mut attempt_errors: Vec<String> = Vec::new();
         let cookie_arg = self.cookie_arg();
 
+        let audio_quality = match format {
+            "flac" | "wav" | "aiff" => "0",
+            "mp3" => "320K",
+            "aac" => "256K",
+            "ogg" => "192K",
+            _ => "320K",
+        };
+        let audio_fmt = format;
         for (i, client) in clients.iter().enumerate() {
             // web_embedded is the only client that reliably serves a real
             // audio-only format (140/m4a) without a PO token; the others
             // need format 18 (a combined, lower-bitrate mp4) specifically
             // because that's the one format YouTube leaves fetchable for
             // them even when it warns about a missing PO token.
-            let format = if *client == "web_embedded" {
+            let ytdlp_format = if *client == "web_embedded" {
                 "bestaudio[ext=m4a]/bestaudio/best"
             } else {
                 "18"
@@ -762,12 +771,12 @@ impl ProviderAdapter for YtdlpAdapter {
             let client_arg = format!("youtube:player_client={client}");
             let base_args = [
                 "-f",
-                format,
+                ytdlp_format,
                 "-x",
                 "--audio-format",
-                "mp3",
+                audio_fmt,
                 "--audio-quality",
-                "320K",
+                audio_quality,
                 "--ffmpeg-location",
                 &ffmpeg_str,
                 "--output",
@@ -844,8 +853,8 @@ impl ProviderAdapter for YtdlpAdapter {
             }
         }
 
-        // Find the downloaded mp3 file
-        find_latest_mp3(dest_dir)
+        // Find the downloaded file
+        find_latest_download(dest_dir, audio_fmt)
     }
 
     async fn search(&self, query: &str) -> Result<Vec<TrackCandidate>> {
@@ -873,15 +882,18 @@ impl ProviderAdapter for YtdlpAdapter {
     }
 }
 
-/// Find the most recently created mp3 file in a directory.
-fn find_latest_mp3(dir: &Path) -> Result<PathBuf> {
+/// Find the most recently created audio file of the given format in a directory.
+fn find_latest_download(dir: &Path, format: &str) -> Result<PathBuf> {
     let mut entries: Vec<_> = std::fs::read_dir(dir)
         .map_err(ProviderError::Io)?
         .filter_map(|e| e.ok())
         .filter(|e| {
             e.path()
                 .extension()
-                .map(|ext| ext == "mp3")
+                .map(|ext| {
+                    ext.to_string_lossy().to_ascii_lowercase()
+                        == format.to_ascii_lowercase()
+                })
                 .unwrap_or(false)
         })
         .filter_map(|e| {

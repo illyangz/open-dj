@@ -1,19 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { api, onStemModelDownloadProgress, onStemSplitProgress } from "../lib/api";
 import { useTrackAnalysis } from "../lib/useTrackAnalysis";
 import { useTrackWaveform } from "../lib/useTrackWaveform";
 import { useAppStore } from "../store/useAppStore";
 import { PlayIcon, PauseIcon, ExpandIcon, CloseIcon } from "../components/icons";
+import { KeyBadge } from "../components/KeyBadge";
 import { ZoomControl } from "../components/ZoomControl";
 import { recolor } from "../lib/waveformColor";
 import type {
   BandWaveform,
   Crate,
   CuePoint,
+  DuplicateGroup,
   Job,
+  KeyColorMode,
   PlannedMove,
   StemDownloadResult,
   StemName,
@@ -38,16 +40,25 @@ const COLLISION_LABEL: Record<PlannedMove["collision"], string> = {
 export function LibraryWorkspace() {
   const jobs = useAppStore((s) => s.jobs);
   const zoomPercent = useAppStore((s) => s.zoomPercent);
-  const downloads = useMemo(
-    () => jobs.filter((j) => j.state === "complete" && j.destination),
-    [jobs],
-  );
+  const downloads = useMemo(() => {
+    // Dedupe by destination — multiple Job rows can point at the same file
+    // (e.g. repeated SoundCloud downloads). Keep the most recently updated.
+    const byDest = new Map<string, Job>();
+    for (const j of jobs) {
+      if (j.state !== "complete" || !j.destination) continue;
+      const existing = byDest.get(j.destination);
+      if (!existing || j.updated_at > existing.updated_at) {
+        byDest.set(j.destination, j);
+      }
+    }
+    return [...byDest.values()];
+  }, [jobs]);
   const [tracks, setTracks] = useState<TrackFields[]>([]);
   const [scanning, setScanning] = useState(false);
   const [template, setTemplate] = useState("{artist}/{album}/{title}");
   const [destinationRoot, setDestinationRoot] = useState("");
   const [plan, setPlan] = useState<PlannedMove[] | null>(null);
-  const [duplicates, setDuplicates] = useState<string[][]>([]);
+  const [duplicates, setDuplicates] = useState<DuplicateGroup[]>([]);
   const [crates, setCrates] = useState<Crate[]>([]);
 
   useEffect(() => {
@@ -60,85 +71,61 @@ export function LibraryWorkspace() {
     setCrates((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
   }
 
-  const audioRef = useRef<HTMLAudioElement>(null);
-  // `selectedId` (which track is loaded into the shared <audio> element) is
-  // deliberately separate from `isPlaying` (whether it's audibly playing) —
-  // they used to be the same flag, which meant pausing fully deselected a
-  // track and lost its playhead/cue context. Keeping them apart lets a
-  // paused track stay "loaded": its playhead stays visible and its cues
-  // stay jump-to-able without reloading.
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-
-  // The shared <audio> element's play/pause state can change from several
-  // call sites (togglePlay, jumpToCue, native `ended`) — mirror it into
-  // React state from the element itself rather than setting `isPlaying` by
-  // hand at every call site, so it can't drift out of sync.
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const onPlay = () => setIsPlaying(true);
-    const onPause = () => setIsPlaying(false);
-    audio.addEventListener("play", onPlay);
-    audio.addEventListener("pause", onPause);
-    audio.addEventListener("ended", onPause);
-    return () => {
-      audio.removeEventListener("play", onPlay);
-      audio.removeEventListener("pause", onPause);
-      audio.removeEventListener("ended", onPause);
-    };
-  }, []);
+  // Global player state (survives workspace tab switches)
+  const playTrack = useAppStore((s) => s.playTrack);
+  const togglePlayGlobal = useAppStore((s) => s.togglePlay);
+  const seekGlobal = useAppStore((s) => s.seek);
+  const playerCurrent = useAppStore((s) => s.player.current);
+  const isPlaying = useAppStore((s) => s.player.isPlaying);
+  const selectedId = playerCurrent?.jobId ?? null;
 
   function togglePlay(job: Job) {
     if (!job.destination) return;
-    const audio = audioRef.current;
-    if (!audio) return;
     if (selectedId === job.id) {
-      if (audio.paused) void audio.play();
-      else audio.pause();
+      togglePlayGlobal();
     } else {
-      audio.src = convertFileSrc(job.destination);
-      setSelectedId(job.id);
-      void audio.play();
+      const queue = downloads.map((d) => ({
+        jobId: d.id,
+        title: d.title,
+        artist: d.artist,
+        destination: d.destination!,
+        durationSec: null,
+      }));
+      playTrack(
+        {
+          jobId: job.id,
+          title: job.title,
+          artist: job.artist,
+          destination: job.destination,
+          durationSec: null,
+        },
+        queue,
+      );
     }
   }
 
-  /** Jump to (and audibly confirm) a saved cue: loads+plays the track if it
-   * isn't already selected, otherwise just retargets playback in place.
-   * Distinct from `seekPreview` below — this one is allowed to start audio
-   * because the user asked to hear a specific cue, not just to mark a
-   * position. */
   function jumpToCue(job: Job, seconds: number) {
     if (!job.destination) return;
-    const audio = audioRef.current;
-    if (!audio) return;
-
     if (selectedId !== job.id) {
-      audio.src = convertFileSrc(job.destination);
-      setSelectedId(job.id);
-      const onLoaded = () => {
-        audio.currentTime = seconds;
-        audio.removeEventListener("loadedmetadata", onLoaded);
-      };
-      audio.addEventListener("loadedmetadata", onLoaded);
-      void audio.play();
-    } else {
-      audio.currentTime = seconds;
-      if (audio.paused) void audio.play();
+      const queue = downloads.map((d) => ({
+        jobId: d.id,
+        title: d.title,
+        artist: d.artist,
+        destination: d.destination!,
+        durationSec: null,
+      }));
+      playTrack(
+        {
+          jobId: job.id,
+          title: job.title,
+          artist: job.artist,
+          destination: job.destination,
+          durationSec: null,
+        },
+        queue,
+      );
     }
-  }
-
-  /** Waveform click: repositions the loaded track's playback if this row
-   * is already selected, but — unlike `jumpToCue` — never starts playback
-   * on its own. A row that isn't selected yet has no shared-audio-element
-   * effect at all; its own local cursor (in DownloadRow) still updates for
-   * visual feedback and cue-setting purposes independent of this, which is
-   * what lets you set every cue on a track without ever pressing play. */
-  function seekPreview(job: Job, seconds: number) {
-    if (!job.destination) return;
-    const audio = audioRef.current;
-    if (!audio || selectedId !== job.id) return;
-    audio.currentTime = seconds;
+    seekGlobal(seconds);
   }
 
   async function scanFolder() {
@@ -165,7 +152,7 @@ export function LibraryWorkspace() {
         )
         .filter((t): t is TrackFields => t !== null);
       setTracks(nextTracks);
-      setDuplicates(await api.findDuplicateTracks(nextTracks));
+      setDuplicates(await api.findDuplicateGroups(nextTracks));
     } finally {
       setScanning(false);
     }
@@ -216,16 +203,14 @@ export function LibraryWorkspace() {
                 selected={selectedId === job.id}
                 playing={isPlaying && selectedId === job.id}
                 onTogglePlay={() => togglePlay(job)}
-                onSeekPreview={(seconds) => seekPreview(job, seconds)}
                 onJumpToCue={(seconds) => jumpToCue(job, seconds)}
-                audioRef={audioRef}
                 crates={crates}
                 onAddToCrate={(crateId) => job.destination && void api.addTrackToCrate(crateId, job.destination)}
                 onCreateCrateAndAdd={(name) => job.destination && void createCrateAndAdd(name, job.destination)}
+                onRemove={() => job.destination && void api.removeFromLibrary(job.destination)}
               />
             ))}
           </ul>
-          <audio ref={audioRef} className="hidden" />
         </div>
       )}
 
@@ -268,14 +253,16 @@ export function LibraryWorkspace() {
           </button>
 
           {duplicates.length > 0 && (
-            <div className="rounded-lg border border-danger/40 bg-danger/5 p-4">
-              <p className="text-sm font-medium text-danger">{duplicates.length} duplicate group(s) found</p>
-              <ul className="mt-2 space-y-2 text-xs font-mono text-parchment-dim">
-                {duplicates.map((group, i) => (
-                  <li key={i}>{group.join("  ==  ")}</li>
-                ))}
-              </ul>
-            </div>
+            <DuplicatePanel
+              groups={duplicates}
+              onMerge={async (canonical, redundants) => {
+                await api.mergeDuplicateGroup(canonical, redundants);
+                // Refresh: re-scan to update tracks and duplicates
+                const refreshed = tracks.filter((t) => !redundants.includes(t.source_path));
+                setTracks(refreshed);
+                setDuplicates(await api.findDuplicateGroups(refreshed));
+              }}
+            />
           )}
 
           {plan && (
@@ -807,6 +794,22 @@ function TrackDetailModal({
               </button>
             ))}
           </div>
+          <div className="flex items-center gap-1 shrink-0 rounded-full border border-charcoal-700 p-0.5">
+            {(["none", "serato", "rekordbox"] as KeyColorMode[]).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => settings && void saveSettings({ ...settings, key_color_mode: mode })}
+                className={[
+                  "px-2 py-1 rounded-full text-[10px] font-medium transition-colors",
+                  (settings?.key_color_mode ?? "none") === mode
+                    ? "bg-charcoal-700 text-signal"
+                    : "text-parchment-dim hover:text-parchment",
+                ].join(" ")}
+              >
+                {mode === "none" ? "No Color" : mode === "serato" ? "Serato" : "Rekordbox"}
+              </button>
+            ))}
+          </div>
           <StemDownloadButton job={job} />
         </div>
 
@@ -912,27 +915,26 @@ function DownloadRow({
   selected,
   playing,
   onTogglePlay,
-  onSeekPreview,
   onJumpToCue,
-  audioRef,
   crates,
   onAddToCrate,
   onCreateCrateAndAdd,
+  onRemove,
 }: {
   job: Job;
   selected: boolean;
   playing: boolean;
   onTogglePlay: () => void;
-  onSeekPreview: (seconds: number) => void;
   onJumpToCue: (seconds: number) => void;
-  audioRef: React.RefObject<HTMLAudioElement | null>;
   crates: Crate[];
   onAddToCrate: (crateId: string) => void;
   onCreateCrateAndAdd: (name: string) => void;
+  onRemove: () => void;
 }) {
   const settings = useAppStore((s) => s.settings);
   const waveformColorMode = settings?.waveform_color_mode ?? "three-band";
   const customColors = settings?.waveform_custom_colors ?? null;
+  const seekGlobal = useAppStore((s) => s.seek);
   const { bands, mono: waveform } = useTrackWaveform(job.destination, waveformColorMode);
   const { bpm, key, durationSec, analyzing } = useTrackAnalysis(job.destination);
   // The cue-setting cursor: while `selected`, this tracks the shared
@@ -987,22 +989,13 @@ function DownloadRow({
     if (settings?.sync_enabled) void api.pushTrackSync(job.destination).catch(() => {});
   }
 
-  // Keep `position` glued to the shared <audio> element's real time
-  // whenever this row is the loaded one — including while paused, so a
-  // manual seek (or the cue-jump landing point) is reflected immediately
-  // rather than waiting for the next `timeupdate` tick during playback.
+  // Keep `position` synced from the global player when this row is selected
+  const globalPlayerPosition = useAppStore((s) => s.player.position);
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio || !selected) return;
-    const sync = () => setPosition(audio.currentTime);
-    audio.addEventListener("timeupdate", sync);
-    audio.addEventListener("seeked", sync);
-    sync();
-    return () => {
-      audio.removeEventListener("timeupdate", sync);
-      audio.removeEventListener("seeked", sync);
-    };
-  }, [audioRef, selected]);
+    if (selected) {
+      setPosition(globalPlayerPosition);
+    }
+  }, [selected, globalPlayerPosition]);
 
   function fractionFromEvent(e: React.MouseEvent): number {
     const box = waveformBoxRef.current;
@@ -1011,12 +1004,14 @@ function DownloadRow({
     return Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
   }
 
-  /** Set the cue-setting cursor and, if this track happens to be the one
-   * loaded into the shared player, retarget playback to match — but never
-   * start playback on its own. */
+  /** Set the cue-setting cursor and, if this track is the one loaded into
+   *  the shared player, retarget playback to match — but never start
+   *  playback on its own. */
   function handleSeek(seconds: number) {
     setPosition(seconds);
-    onSeekPreview(seconds);
+    if (selected) {
+      seekGlobal(seconds);
+    }
   }
 
   const playedFraction = durationSec > 0 ? Math.min(1, position / durationSec) : 0;
@@ -1053,9 +1048,7 @@ function DownloadRow({
             </span>
           )}
           {key && (
-            <span className="text-[10px] text-sky-400/70 bg-sky-400/10 px-1.5 py-0.5 rounded">
-              {key}
-            </span>
+            <KeyBadge key_={key} />
           )}
           <button
             onClick={() => setExpanded(true)}
@@ -1070,6 +1063,16 @@ function DownloadRow({
             className="px-3 py-1.5 rounded-full text-xs font-medium border border-charcoal-700 text-parchment-dim hover:text-parchment hover:border-teal/60 transition-colors"
           >
             Reveal in Finder
+          </button>
+          <button
+            onClick={() => {
+              if (confirm(`Remove "${job.title ?? "this track"}" from library? The file will be deleted.`)) {
+                onRemove();
+              }
+            }}
+            className="px-3 py-1.5 rounded-full text-xs font-medium border border-danger/40 text-danger/80 hover:bg-danger/10 transition-colors"
+          >
+            Remove
           </button>
         </div>
       </div>
@@ -1199,5 +1202,107 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="text-[11px] uppercase tracking-wide text-parchment-dim/70">{label}</span>
       {children}
     </label>
+  );
+}
+
+function DuplicatePanel({
+  groups,
+  onMerge,
+}: {
+  groups: DuplicateGroup[];
+  onMerge: (canonicalPath: string, redundantPaths: string[]) => Promise<void>;
+}) {
+  const [selectedCanonical, setSelectedCanonical] = useState<Record<number, string>>(() => {
+    const init: Record<number, string> = {};
+    groups.forEach((g, i) => {
+      init[i] = g.suggested_canonical;
+    });
+    return init;
+  });
+  const [merging, setMerging] = useState(false);
+
+  // Keep selectedCanonical in sync when groups change
+  useEffect(() => {
+    setSelectedCanonical((prev) => {
+      const next = { ...prev };
+      groups.forEach((g, i) => {
+        if (!(i in next)) next[i] = g.suggested_canonical;
+      });
+      return next;
+    });
+  }, [groups]);
+
+  async function handleMerge(groupIdx: number) {
+    const group = groups[groupIdx];
+    const canonical = selectedCanonical[groupIdx];
+    const redundants = group.tracks
+      .map((t) => t.source_path)
+      .filter((p) => p !== canonical);
+    if (redundants.length === 0) return;
+    setMerging(true);
+    try {
+      await onMerge(canonical, redundants);
+    } finally {
+      setMerging(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-danger/40 bg-danger/5 p-4">
+      <p className="text-sm font-medium text-danger">
+        {groups.length} duplicate group(s) found
+      </p>
+      <p className="text-[11px] text-parchment-dim mt-1">
+        Exact file duplicates (byte-identical checksum). Pick which copy to keep, then merge.
+      </p>
+      <div className="mt-3 space-y-4">
+        {groups.map((group, gi) => (
+          <div key={gi} className="rounded-md border border-charcoal-700 bg-charcoal-800/40 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-mono text-parchment-dim">
+                Group {gi + 1} — {group.tracks.length} copies
+              </span>
+              <button
+                onClick={() => void handleMerge(gi)}
+                disabled={merging}
+                className="px-3 py-1 rounded-full text-xs font-medium bg-signal text-charcoal-950 hover:bg-signal-dim disabled:opacity-40 transition-colors"
+              >
+                {merging ? "Merging…" : "Merge & Remove Duplicates"}
+              </button>
+            </div>
+            <div className="space-y-1">
+              {group.tracks.map((track) => (
+                <label
+                  key={track.source_path}
+                  className="flex items-center gap-2 text-xs cursor-pointer"
+                >
+                  <input
+                    type="radio"
+                    name={`canonical-${gi}`}
+                    checked={selectedCanonical[gi] === track.source_path}
+                    onChange={() =>
+                      setSelectedCanonical((prev) => ({ ...prev, [gi]: track.source_path }))
+                    }
+                    className="accent-signal"
+                  />
+                  <span className="font-medium text-parchment">
+                    {track.title ?? track.source_path.split("/").pop()}
+                  </span>
+                  {track.artist && (
+                    <span className="text-parchment-dim">— {track.artist}</span>
+                  )}
+                  {selectedCanonical[gi] === track.source_path && (
+                    <span className="text-[10px] text-signal">(canonical)</span>
+                  )}
+                  <span className="text-[10px] text-parchment-dim/50 font-mono ml-auto truncate max-w-[200px]">
+                    {track.source_path}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

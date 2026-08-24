@@ -158,3 +158,19 @@ export function CommunityIcon({ className = base }: IconProps) {
     </svg>
   );
 }
+
+export function PrevIcon({ className = base }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M6 6h2v12H6V6Zm3.5 6 8.5 6V6l-8.5 6Z" />
+    </svg>
+  );
+}
+
+export function NextIcon({ className = base }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M16 6h2v12h-2V6ZM6 18l8.5-6L6 6v12Z" />
+    </svg>
+  );
+}

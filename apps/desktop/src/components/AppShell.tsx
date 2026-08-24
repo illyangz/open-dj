@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { useAppStore } from "../store/useAppStore";
 import type { WorkspaceId } from "../types";
+import { PlayerBar } from "./PlayerBar";
 import { Tour } from "./Tour";
 import { UpdateBanner } from "./UpdateBanner";
 import { UsernameWidget } from "./UsernameWidget";
@@ -85,6 +86,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             );
           })}
         </ul>
+
+        <PlayerBar />
 
         <div className="px-3 py-3 border-t border-charcoal-700">
           <UsernameWidget compact />

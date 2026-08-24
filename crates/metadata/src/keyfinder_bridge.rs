@@ -7,6 +7,7 @@
 
 use libloading::{Library, Symbol};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 type DetectKeyFn = unsafe extern "C" fn(*const f32, usize, u32, u32) -> i32;
 
@@ -45,16 +46,26 @@ fn find_bridge_dylib() -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
+/// Cached library handle — dlopen is syscall-heavy (filesystem access,
+/// Mach-O parsing, symbol resolution), so we load once and reuse.
+fn cached_library() -> Option<&'static Library> {
+    static LIB: OnceLock<Option<Library>> = OnceLock::new();
+    LIB.get_or_init(|| {
+        let path = find_bridge_dylib()?;
+        unsafe { Library::new(&path) }.ok()
+    })
+    .as_ref()
+}
+
 /// Detect key via libkeyfinder (Mixxx's key-detection engine) if it's
 /// available on this machine. `samples` is interleaved PCM at the given
 /// channel count/sample rate — pass the original decode, not a downmix;
 /// libkeyfinder does its own channel reduction internally.
 fn detect_key_code(samples: &[f32], channels: u32, sample_rate: u32) -> Option<i32> {
-    let path = find_bridge_dylib()?;
+    let lib = cached_library()?;
     // Safety: we only load a dylib we built ourselves and bundle with the
     // app; `opendj_detect_key` is defined in crates/keyfinder-bridge with
     // a matching signature and never unwinds across the FFI boundary.
-    let lib = unsafe { Library::new(&path) }.ok()?;
     let func: Symbol<DetectKeyFn> = unsafe { lib.get(b"opendj_detect_key\0") }.ok()?;
     let code = unsafe { func(samples.as_ptr(), samples.len(), channels, sample_rate) };
     Some(code)

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { AppShell } from "./components/AppShell";
+import { GlobalAudioElement } from "./components/GlobalAudioElement";
 import { LawfulUseGate } from "./components/LawfulUseGate";
 import { useAppStore } from "./store/useAppStore";
 import { QueueWorkspace } from "./workspaces/QueueWorkspace";
@@ -37,6 +38,7 @@ function App() {
 
   return (
     <>
+      <GlobalAudioElement />
       <AppShell>
         <Workspace />
       </AppShell>

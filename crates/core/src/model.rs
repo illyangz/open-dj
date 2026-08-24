@@ -1,6 +1,72 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use uuid::Uuid;
+
+/// User-selectable output format for downloads. Determines which encoder
+/// yt-dlp/ffmpeg uses and which file extension the result gets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DownloadFormat {
+    Mp3,
+    Flac,
+    Wav,
+    Aac,
+    Ogg,
+    Aiff,
+}
+
+impl DownloadFormat {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DownloadFormat::Mp3 => "mp3",
+            DownloadFormat::Flac => "flac",
+            DownloadFormat::Wav => "wav",
+            DownloadFormat::Aac => "aac",
+            DownloadFormat::Ogg => "ogg",
+            DownloadFormat::Aiff => "aiff",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Self {
+        match s {
+            "flac" => DownloadFormat::Flac,
+            "wav" => DownloadFormat::Wav,
+            "aac" => DownloadFormat::Aac,
+            "ogg" => DownloadFormat::Ogg,
+            "aiff" => DownloadFormat::Aiff,
+            _ => DownloadFormat::Mp3,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            DownloadFormat::Mp3 => "MP3 (320kbps)",
+            DownloadFormat::Flac => "FLAC (Lossless)",
+            DownloadFormat::Wav => "WAV (Lossless)",
+            DownloadFormat::Aac => "AAC (256kbps)",
+            DownloadFormat::Ogg => "OGG Vorbis",
+            DownloadFormat::Aiff => "AIFF (Lossless)",
+        }
+    }
+
+    pub fn all() -> &'static [DownloadFormat] {
+        &[
+            DownloadFormat::Mp3,
+            DownloadFormat::Flac,
+            DownloadFormat::Wav,
+            DownloadFormat::Aac,
+            DownloadFormat::Ogg,
+            DownloadFormat::Aiff,
+        ]
+    }
+}
+
+impl fmt::Display for DownloadFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -240,10 +306,27 @@ pub struct Settings {
     /// nothing is sent to the sync backend until the user turns this on.
     #[serde(default)]
     pub sync_enabled: bool,
+    /// User's preferred output format for new downloads. Defaults to MP3.
+    #[serde(default = "default_download_format")]
+    pub default_output_format: DownloadFormat,
+    /// "serato" | "rekordbox" | "none" — which key color scheme to use.
+    /// "serato" = static background color per Camelot key,
+    /// "rekordbox" = green highlight for harmonically compatible keys,
+    /// "none" = no color coding.
+    #[serde(default = "default_key_color_mode")]
+    pub key_color_mode: String,
 }
 
 fn default_waveform_color_mode() -> String {
     "three-band".to_string()
+}
+
+fn default_download_format() -> DownloadFormat {
+    DownloadFormat::Mp3
+}
+
+fn default_key_color_mode() -> String {
+    "serato".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -294,6 +377,8 @@ impl Default for Settings {
             device_secret: String::new(),
             username: String::new(),
             sync_enabled: false,
+            default_output_format: DownloadFormat::Mp3,
+            key_color_mode: default_key_color_mode(),
         }
     }
 }

@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAppStore } from "../store/useAppStore";
+import { KeyBadge } from "../components/KeyBadge";
 import type { Job, JobState, ScTrack } from "../types";
 
 // w-10 h-10 artwork (40px) + py-2 (16px) — matches TrackRow's rendered height.
@@ -225,9 +226,7 @@ function TrackRow({
           </span>
         )}
         {track.key && (
-          <span className="text-[10px] text-sky-400/70 bg-sky-400/10 px-1.5 py-0.5 rounded">
-            {track.key}
-          </span>
+          <KeyBadge key_={track.key} />
         )}
         {track.genre && (
           <span className="text-[10px] text-parchment-dim/60 bg-charcoal-700 px-1.5 py-0.5 rounded hidden sm:inline">

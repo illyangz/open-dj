@@ -106,8 +106,9 @@ async fn run(app: &AppHandle, state: &AppState, job_id: Uuid) -> Result<(), Stri
         .map_err(|e| e.to_string())?;
     emit_job(app, state, job_id);
     let dest_dir = state.download_root.read().await.clone();
+    let format_str = job.requested_format.as_deref().unwrap_or("mp3");
     let path = provider
-        .fetch(&candidate, &dest_dir)
+        .fetch(&candidate, &dest_dir, format_str)
         .await
         .map_err(|e| e.to_string())?;
 

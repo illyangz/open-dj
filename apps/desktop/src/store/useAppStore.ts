@@ -1,6 +1,15 @@
 import { create } from "zustand";
 import { api, onQueueUpdated } from "../lib/api";
-import type { Job, ProviderInfo, ScTrack, Settings, WorkspaceId } from "../types";
+import type {
+  DownloadFormat,
+  Job,
+  PlayerState,
+  PlayerTrack,
+  ProviderInfo,
+  ScTrack,
+  Settings,
+  WorkspaceId,
+} from "../types";
 
 const ZOOM_STORAGE_KEY = "opendj.zoomPercent";
 
@@ -95,6 +104,21 @@ interface AppStore {
   initialized: boolean;
   init: () => Promise<void>;
 
+  /** Global playback transport — survives workspace tab switches.
+   * One <audio> element owned by GlobalAudioElement at the App.tsx root. */
+  player: PlayerState;
+  playTrack: (track: PlayerTrack, contextQueue: PlayerTrack[]) => void;
+  togglePlay: () => void;
+  seek: (seconds: number) => void;
+  next: () => void;
+  prev: () => void;
+  setPlayerPosition: (pos: number) => void;
+  setPlayerDuration: (dur: number) => void;
+
+  /** Selected download format for new ingestions. Persisted in settings. */
+  selectedFormat: DownloadFormat;
+  setSelectedFormat: (fmt: DownloadFormat) => void;
+
   /** Lives here (not local component state) so a lookup or a batch of
    * downloads keeps running/showing progress when the user switches away
    * to another workspace tab and back — the SoundCloud workspace used to
@@ -153,7 +177,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }));
   },
   enqueue: async (text: string) => {
-    const created = await api.ingestInputs(text);
+    const format = get().selectedFormat;
+    const created = await api.ingestInputs(text, format);
     if (created.length > 0) {
       set((state) => {
         const existingIds = new Set(state.jobs.map((j) => j.id));
@@ -205,10 +230,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (get().initialized) return;
     set({ initialized: true });
     await Promise.all([get().refreshJobs(), get().refreshProviders(), get().refreshSettings()]);
+    // Restore selected format from settings
+    const settings = get().settings;
+    if (settings?.default_output_format) {
+      set({ selectedFormat: settings.default_output_format });
+    }
     if (get().settings?.sync_enabled) {
-      // Best-effort: a fresh install/offline pull failing shouldn't block
-      // startup, and the local settings we already loaded are a perfectly
-      // usable fallback.
       api
         .pullPreferences()
         .then(() => get().refreshSettings())
@@ -218,6 +245,50 @@ export const useAppStore = create<AppStore>((set, get) => ({
       get().patchJob(job);
     });
   },
+
+  player: { current: null, isPlaying: false, position: 0, contextQueue: [] },
+  playTrack: (track, contextQueue) => {
+    set({ player: { current: track, isPlaying: true, position: 0, contextQueue } });
+  },
+  togglePlay: () => {
+    set((s) => ({
+      player: { ...s.player, isPlaying: !s.player.isPlaying },
+    }));
+  },
+  seek: (seconds) => {
+    set((s) => ({ player: { ...s.player, position: seconds } }));
+  },
+  next: () => {
+    const { player } = get();
+    if (!player.current) return;
+    const idx = player.contextQueue.findIndex(
+      (t) => t.jobId === player.current!.jobId,
+    );
+    if (idx < 0 || idx >= player.contextQueue.length - 1) return;
+    const next = player.contextQueue[idx + 1];
+    set({ player: { ...player, current: next, position: 0 } });
+  },
+  prev: () => {
+    const { player } = get();
+    if (!player.current) return;
+    const idx = player.contextQueue.findIndex(
+      (t) => t.jobId === player.current!.jobId,
+    );
+    if (idx <= 0) return;
+    const prev = player.contextQueue[idx - 1];
+    set({ player: { ...player, current: prev, position: 0 } });
+  },
+  setPlayerPosition: (pos) => set((s) => ({ player: { ...s.player, position: pos } })),
+  setPlayerDuration: (dur) =>
+    set((s) => ({
+      player: {
+        ...s.player,
+        current: s.player.current ? { ...s.player.current, durationSec: dur } : null,
+      },
+    })),
+
+  selectedFormat: "mp3",
+  setSelectedFormat: (fmt) => set({ selectedFormat: fmt }),
 
   soundcloud: (() => {
     const cached = loadSoundcloudCache();

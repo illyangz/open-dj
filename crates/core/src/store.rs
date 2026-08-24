@@ -54,7 +54,12 @@ impl Store {
     }
 
     /// Creates a job in `Waiting` state for a previously-inserted input.
-    pub fn create_job(&self, input_id: Uuid, provider_id: Option<&str>) -> Result<Job> {
+    pub fn create_job(
+        &self,
+        input_id: Uuid,
+        provider_id: Option<&str>,
+        requested_format: Option<&str>,
+    ) -> Result<Job> {
         let now = Utc::now();
         let job = Job {
             id: Uuid::new_v4(),
@@ -65,7 +70,7 @@ impl Store {
             title: None,
             artist: None,
             provider_id: provider_id.map(|s| s.to_string()),
-            requested_format: None,
+            requested_format: requested_format.map(|s| s.to_string()),
             destination: None,
             error_class: None,
             error_message: None,
@@ -403,6 +408,35 @@ impl Store {
         Ok(rows)
     }
 
+    /// Re-point all cue points from one file path to another. Used by
+    /// duplicate merge (preserves cues from redundant file) and remove
+    /// (not used directly — remove deletes cues instead).
+    pub fn repoint_cue_points(&self, from_path: &str, to_path: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        // If the destination already has a cue in the same slot, the
+        // source's cue wins (last-write-wins, documented in §1.4).
+        conn.execute(
+            "DELETE FROM cue_points WHERE track_path = ?2
+             AND slot IN (SELECT slot FROM cue_points WHERE track_path = ?1)",
+            params![from_path, to_path],
+        )?;
+        conn.execute(
+            "UPDATE cue_points SET track_path = ?2 WHERE track_path = ?1",
+            params![from_path, to_path],
+        )?;
+        Ok(())
+    }
+
+    /// Delete all cue points for a given track path.
+    pub fn delete_cues_for_path(&self, track_path: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM cue_points WHERE track_path = ?1",
+            params![track_path],
+        )?;
+        Ok(())
+    }
+
     pub fn create_crate(&self, name: &str) -> Result<Crate> {
         let conn = self.conn.lock().unwrap();
         let now = Utc::now();
@@ -489,6 +523,33 @@ impl Store {
         conn.execute(
             "DELETE FROM crate_tracks WHERE crate_id = ?1 AND track_path = ?2",
             params![crate_id.to_string(), track_path],
+        )?;
+        Ok(())
+    }
+
+    /// Re-point all crate_tracks entries from one path to another.
+    /// Used by duplicate merge to preserve crate membership.
+    pub fn repoint_crate_tracks(&self, from_path: &str, to_path: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        // Skip if destination already has this track in the same crate
+        conn.execute(
+            "DELETE FROM crate_tracks WHERE track_path = ?2
+             AND crate_id IN (SELECT crate_id FROM crate_tracks WHERE track_path = ?1)",
+            params![from_path, to_path],
+        )?;
+        conn.execute(
+            "UPDATE crate_tracks SET track_path = ?2 WHERE track_path = ?1",
+            params![from_path, to_path],
+        )?;
+        Ok(())
+    }
+
+    /// Delete all crate_tracks entries for a given path.
+    pub fn delete_crate_tracks_for_path(&self, track_path: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM crate_tracks WHERE track_path = ?1",
+            params![track_path],
         )?;
         Ok(())
     }
@@ -641,7 +702,7 @@ mod tests {
         let store = store();
         let inputs = parse_inputs("Daft Punk - One More Time", "paste");
         store.insert_input(&inputs[0]).unwrap();
-        let job = store.create_job(inputs[0].id, Some("spotify")).unwrap();
+        let job = store.create_job(inputs[0].id, Some("spotify"), None).unwrap();
         assert_eq!(job.state, JobState::Waiting);
 
         let jobs = store.list_jobs().unwrap();
@@ -654,7 +715,7 @@ mod tests {
         let store = store();
         let inputs = parse_inputs("https://example.com/track.mp3", "paste");
         store.insert_input(&inputs[0]).unwrap();
-        let job = store.create_job(inputs[0].id, Some("direct_url")).unwrap();
+        let job = store.create_job(inputs[0].id, Some("direct_url"), None).unwrap();
 
         let paused = store.pause_job(job.id).unwrap();
         assert_eq!(paused.state, JobState::Paused);
@@ -683,7 +744,7 @@ mod tests {
             let store = Store::new(conn);
             let inputs = parse_inputs("Daft Punk - One More Time", "paste");
             store.insert_input(&inputs[0]).unwrap();
-            store.create_job(inputs[0].id, None).unwrap();
+            store.create_job(inputs[0].id, None, None).unwrap();
         }
 
         // Simulate relaunch: reopen the same file and confirm the job persisted.

@@ -97,7 +97,7 @@ impl ProviderAdapter for DirectUrlProvider {
         }])
     }
 
-    async fn fetch(&self, candidate: &TrackCandidate, dest_dir: &Path) -> Result<PathBuf> {
+    async fn fetch(&self, candidate: &TrackCandidate, dest_dir: &Path, _format: &str) -> Result<PathBuf> {
         let resp = self.client.get(&candidate.source_url).send().await?;
         let resp = resp.error_for_status()?;
         let bytes = resp.bytes().await?;

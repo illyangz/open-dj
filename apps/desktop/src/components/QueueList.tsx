@@ -29,10 +29,25 @@ export function QueueList() {
   const [clearing, setClearing] = useState(false);
 
   const activeFilter = FILTERS.find((f) => f.id === filter)!;
-  const jobs = useMemo(
-    () => (filter === "all" ? allJobs : allJobs.filter((j) => activeFilter.match(j.state))),
-    [allJobs, filter, activeFilter],
-  );
+  const jobs = useMemo(() => {
+    const filtered = filter === "all" ? allJobs : allJobs.filter((j) => activeFilter.match(j.state));
+    // Dedupe completed jobs by destination (multiple downloads of same track)
+    if (filter === "all" || filter === "complete") {
+      const byDest = new Map<string, typeof filtered[0]>();
+      for (const j of filtered) {
+        if (j.state === "complete" && j.destination) {
+          const existing = byDest.get(j.destination);
+          if (!existing || j.updated_at > existing.updated_at) {
+            byDest.set(j.destination, j);
+          }
+        } else {
+          byDest.set(j.id, j);
+        }
+      }
+      return [...byDest.values()];
+    }
+    return filtered;
+  }, [allJobs, filter, activeFilter]);
 
   const virtualizer = useVirtualizer({
     count: jobs.length,

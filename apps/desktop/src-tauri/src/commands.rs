@@ -23,9 +23,11 @@ pub async fn ingest_inputs(
     app: AppHandle,
     state: State<'_, AppState>,
     text: String,
+    format: Option<String>,
 ) -> CmdResult<Vec<Job>> {
     let inputs = opendj_core::ingest::parse_inputs(&text, "paste");
     let mut jobs = Vec::with_capacity(inputs.len());
+    let format_str = format.as_deref();
 
     for input in &inputs {
         if input.kind == InputKind::Url && input.provider_id.as_deref() == Some("ytdlp") {
@@ -49,7 +51,7 @@ pub async fn ingest_inputs(
                             .map_err(|e| e.to_string())?;
                         let mut job = state
                             .store
-                            .create_job(track_input.id, Some("ytdlp"))
+                            .create_job(track_input.id, Some("ytdlp"), format_str)
                             .map_err(|e| e.to_string())?;
                         // Pre-fill metadata from playlist resolution
                         job.title = entry.title.clone();
@@ -64,7 +66,7 @@ pub async fn ingest_inputs(
                     state.store.insert_input(input).map_err(|e| e.to_string())?;
                     let job = state
                         .store
-                        .create_job(input.id, input.provider_id.as_deref())
+                        .create_job(input.id, input.provider_id.as_deref(), format_str)
                         .map_err(|e| e.to_string())?;
                     jobs::spawn(app.clone(), job.id);
                     jobs.push(job);
@@ -82,7 +84,7 @@ pub async fn ingest_inputs(
             });
             let job = state
                 .store
-                .create_job(input.id, provider_id.as_deref())
+                .create_job(input.id, provider_id.as_deref(), format_str)
                 .map_err(|e| e.to_string())?;
             jobs::spawn(app.clone(), job.id);
             jobs.push(job);
@@ -1011,4 +1013,138 @@ pub async fn export_diagnostics(state: State<'_, AppState>) -> CmdResult<Diagnos
         mutation_count: mutations.len(),
         providers,
     })
+}
+
+// ── Remove from library ─────────────────────────────────────────────────────
+
+/// Remove a downloaded track from the library: delete the file, clean up
+/// cue_points and crate_tracks references, and remove associated jobs.
+/// The file is permanently deleted (not backed up) since this is a user-
+/// initiated removal, not a mutation that needs undo support.
+#[tauri::command]
+pub async fn remove_from_library(
+    state: State<'_, AppState>,
+    path: String,
+) -> CmdResult<()> {
+    // Clean up DB references first (before deleting the file)
+    state.store.delete_cues_for_path(&path).map_err(|e| e.to_string())?;
+    state.store.delete_crate_tracks_for_path(&path).map_err(|e| e.to_string())?;
+
+    // Delete the file from disk
+    let _ = tokio::fs::remove_file(&path).await;
+
+    // Remove any jobs pointing at this destination
+    let jobs = state.store.list_jobs().map_err(|e| e.to_string())?;
+    for job in jobs {
+        if job.destination.as_deref() == Some(&path) {
+            let _ = state.store.delete_job(job.id);
+        }
+    }
+    Ok(())
+}
+
+// ── Duplicate detection (Tier 1: exact file duplicates) ────────────────────
+
+use opendj_organization::DuplicateGroup;
+
+/// Find duplicate groups from a list of scanned tracks. Tier 1 only
+/// (exact file checksum match). Returns groups with 2+ members.
+#[tauri::command]
+pub async fn find_duplicate_groups(
+    tracks: Vec<TrackFields>,
+) -> CmdResult<Vec<DuplicateGroup>> {
+    Ok(opendj_organization::find_duplicate_groups(&tracks))
+}
+
+/// Merge a duplicate group: union tags, re-point cues/crates, move
+/// redundant files to backup. Returns mutation records for undo.
+#[tauri::command]
+pub async fn merge_duplicate_group(
+    _app: AppHandle,
+    state: State<'_, AppState>,
+    canonical_path: String,
+    redundant_paths: Vec<String>,
+) -> CmdResult<Vec<MutationRecord>> {
+    use opendj_file_ops::replace_atomic;
+
+    let mut records = Vec::new();
+    let backup_root = state.backup_root.read().await.clone();
+
+    for redundant in &redundant_paths {
+        // 1. Union tags: read redundant's tags, merge into canonical
+        if let Ok(redundant_probe) = opendj_metadata::probe(std::path::Path::new(redundant)) {
+            if let Ok(canonical_probe) = opendj_metadata::probe(std::path::Path::new(&canonical_path))
+            {
+                let mut merged = canonical_probe.tags;
+                let r_tags = redundant_probe.tags;
+                // Fill in gaps: if canonical lacks a field but redundant has it, use it
+                if merged.title.is_none() && r_tags.title.is_some() {
+                    merged.title = r_tags.title;
+                }
+                if merged.artist.is_none() && r_tags.artist.is_some() {
+                    merged.artist = r_tags.artist;
+                }
+                if merged.album.is_none() && r_tags.album.is_some() {
+                    merged.album = r_tags.album;
+                }
+                if merged.genre.is_none() && r_tags.genre.is_some() {
+                    merged.genre = r_tags.genre;
+                }
+                if merged.year.is_none() && r_tags.year.is_some() {
+                    merged.year = r_tags.year;
+                }
+                if merged.track_number.is_none() && r_tags.track_number.is_some() {
+                    merged.track_number = r_tags.track_number;
+                }
+                if merged.bpm.is_none() && r_tags.bpm.is_some() {
+                    merged.bpm = r_tags.bpm;
+                }
+                if merged.key.is_none() && r_tags.key.is_some() {
+                    merged.key = r_tags.key;
+                }
+                let _ = opendj_metadata::write_tags(
+                    std::path::Path::new(&canonical_path),
+                    &merged,
+                );
+            }
+        }
+
+        // 2. Re-point cue_points and crate_tracks from redundant -> canonical
+        state
+            .store
+            .repoint_cue_points(redundant, &canonical_path)
+            .map_err(|e| e.to_string())?;
+        state
+            .store
+            .repoint_crate_tracks(redundant, &canonical_path)
+            .map_err(|e| e.to_string())?;
+
+        // 3. Move redundant file to backup (reuse replace_atomic's backup step)
+        let record = replace_atomic(
+            std::path::Path::new(redundant),
+            std::path::Path::new(&canonical_path),
+            &backup_root,
+        )
+        .map_err(|e| e.to_string())?;
+
+        // Journal the mutation so it's undoable from Repair
+        let journal = opendj_core::MutationJournal {
+            id: uuid::Uuid::new_v4(),
+            job_id: None,
+            original_path: record.original_path.clone(),
+            backup_path: record.backup_path.clone(),
+            original_checksum: record.original_checksum.clone(),
+            replacement_checksum: Some(record.replacement_checksum.clone()),
+            state: opendj_core::MutationState::BackedUp,
+            created_at: chrono::Utc::now(),
+        };
+        state
+            .store
+            .insert_mutation_journal(&journal)
+            .map_err(|e| e.to_string())?;
+
+        records.push(record);
+    }
+
+    Ok(records)
 }
