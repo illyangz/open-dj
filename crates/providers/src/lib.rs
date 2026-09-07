@@ -57,6 +57,8 @@ pub enum ProviderError {
     NotConfigured(&'static str),
     #[error("no match found for input")]
     NoMatch,
+    #[error("{0}")]
+    AuthRequired(String),
     #[error("track is not marked downloadable by the source")]
     NotDownloadable,
     #[error("input not recognized by this provider")]

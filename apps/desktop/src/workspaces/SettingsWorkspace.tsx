@@ -176,7 +176,16 @@ export function SettingsWorkspace() {
       </Section>
 
       <Section title="YouTube">
-        <FieldRow label="Cookies file (recommended)">
+        <p className="text-xs text-parchment-dim mb-3">
+          Age-restricted videos and YouTube's "confirm you're not a bot" check need a
+          signed-in session. OpenDJ handles this automatically: when a download hits one of
+          those walls, it borrows cookies from whichever browser on this computer you're
+          logged into YouTube with (trying Firefox first, then Chrome, Brave, Edge, Safari).
+          Chrome/Brave prompt once for your Mac login password (Keychain); Safari needs
+          OpenDJ granted Full Disk Access. The settings below only override that — leave them
+          empty unless auto-detection isn't working for you.
+        </p>
+        <FieldRow label="Cookies file (override)">
           <div className="flex items-center gap-2">
             <span className="text-xs font-mono text-parchment-dim truncate max-w-[220px]">
               {settings.youtube_cookies_file || "None chosen"}
@@ -197,13 +206,13 @@ export function SettingsWorkspace() {
         <p className="text-xs text-parchment-dim mt-1">
           Export a <span className="font-mono">cookies.txt</span> from a browser you're logged
           into YouTube with (the "Get cookies.txt LOCALLY" extension works for Chrome/Firefox),
-          then select it here. This is the most reliable option — it's a fixed snapshot, so it
-          can't be invalidated mid-request the way live browser-cookie extraction sometimes is.
-          Re-export and re-select if downloads start failing again after a while (YouTube
+          then select it here. Use this if you're not logged into YouTube in any local browser,
+          or auto-detection can't read your browser's cookie store. It's a fixed snapshot —
+          re-export and re-select if downloads start failing again after a while (YouTube
           sessions expire).
         </p>
 
-        <FieldRow label="Or: browser cookies (live)">
+        <FieldRow label="Or: force a specific browser">
           <select
             value={settings.youtube_cookies_browser}
             onChange={(e) => update({ youtube_cookies_browser: e.target.value })}
@@ -218,14 +227,13 @@ export function SettingsWorkspace() {
           </select>
         </FieldRow>
         <p className="text-xs text-parchment-dim mt-1">
-          Only used if no cookies file is set above. Reads cookies live from that browser's
-          storage on every request — Chrome will prompt once for your Mac login password
-          (Keychain), and Safari additionally requires granting OpenDJ Full Disk Access in
-          System Settings → Privacy &amp; Security, since Safari sandboxes its cookie store from
-          every other app.
+          Only used if no cookies file is set above. Pins auto-detection to one browser
+          instead of letting OpenDJ pick — useful if you're logged into YouTube in several
+          browsers but only want it to touch one. Safari requires granting OpenDJ Full Disk
+          Access in System Settings → Privacy &amp; Security.
         </p>
         <p className="text-xs text-amber/80 mt-2">
-          Neither option is a guarantee — YouTube's bot-check runs server-side and can still
+          None of this is a guarantee — YouTube's bot-check runs server-side and can still
           trigger under heavy request volume even with valid cookies. If it keeps happening,
           slow down and space out requests rather than retrying immediately.
         </p>

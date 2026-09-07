@@ -28,7 +28,22 @@ pub struct YtdlpAdapter {
     /// Runtime-settable (via `set_cookies_browser`/`set_cookies_file`) so a
     /// Settings change takes effect without restarting the app.
     cookies: std::sync::RwLock<CookieConfig>,
+    /// Browser that automatic probing last pulled a working YouTube
+    /// session from. When a request hits an auth wall (age gate, bot
+    /// check) and the user hasn't configured cookies themselves, we walk
+    /// the browsers installed on this machine and hand yt-dlp
+    /// `--cookies-from-browser` for each until one works — then remember
+    /// it here so a run of age-gated downloads doesn't re-probe every
+    /// browser (and, on macOS, re-hit the keychain prompt) every time.
+    /// Not persisted: a cheap in-process cache, re-learned on demand.
+    auto_cookie_browser: std::sync::RwLock<Option<String>>,
 }
+
+/// Shown when a YouTube request needs a signed-in account and nothing on
+/// this machine could supply one — the one download failure the user can
+/// actually act on, so it gets a plain-language message instead of raw
+/// yt-dlp stderr.
+const AUTH_HELP: &str = "This YouTube video needs a signed-in account — it's age-restricted, or YouTube flagged the request as automated. OpenDJ checked the web browsers on this computer but none had a usable YouTube session. Fix: sign in to YouTube in Chrome, Firefox, or Safari and retry — or set a cookies.txt file under Settings.";
 
 impl YtdlpAdapter {
     pub fn new() -> Self {
@@ -38,10 +53,13 @@ impl YtdlpAdapter {
                 .build()
                 .expect("reqwest client"),
             cookies: std::sync::RwLock::new(CookieConfig::default()),
+            auto_cookie_browser: std::sync::RwLock::new(None),
         }
     }
 
-    /// The yt-dlp flag + value to authenticate with, if any is configured.
+    /// The yt-dlp flag + value the user has configured in Settings, if
+    /// any — a static `cookies.txt` file wins over a live browser when
+    /// both are set (see the field doc on `cookies`).
     fn cookie_arg(&self) -> Option<(&'static str, String)> {
         let cfg = self.cookies.read().unwrap();
         if let Some(file) = &cfg.file {
@@ -55,6 +73,115 @@ impl YtdlpAdapter {
             }
         }
         None
+    }
+
+    /// yt-dlp reports one of these when a request is walled behind a
+    /// signed-in YouTube session — an age gate, the "confirm you're not a
+    /// bot" check, or a plain login requirement. These are the *only*
+    /// failures a cookie can fix, so automatic browser probing escalates
+    /// on this signature alone — never on a dead link, a geo-block, or a
+    /// network error, where cycling browsers would just fire pointless
+    /// keychain prompts.
+    fn needs_auth(msg: &str) -> bool {
+        msg.contains("confirm your age")
+            || msg.contains("confirm you're not a bot")
+            || msg.contains("Sign in to confirm")
+            || msg.contains("LOGIN_REQUIRED")
+            || msg.contains("age-restricted")
+    }
+
+    /// Browsers with a profile directory present on this machine, as
+    /// yt-dlp `--cookies-from-browser` names, ordered by how much OS
+    /// friction reading their cookie store costs: Firefox needs no prompt
+    /// at all; Chromium-family browsers need the login keychain (a
+    /// one-time macOS prompt per browser); Safari needs Full Disk Access
+    /// granted to the app. `auto_browser_attempts` promotes whichever one
+    /// last worked to the front of this list.
+    fn detected_browsers() -> Vec<&'static str> {
+        let Some(home) = dirs::home_dir() else {
+            return Vec::new();
+        };
+
+        #[cfg(target_os = "macos")]
+        let probes: &[(&str, &str)] = &[
+            ("firefox", "Library/Application Support/Firefox/Profiles"),
+            ("chrome", "Library/Application Support/Google/Chrome"),
+            (
+                "brave",
+                "Library/Application Support/BraveSoftware/Brave-Browser",
+            ),
+            ("edge", "Library/Application Support/Microsoft Edge"),
+            ("chromium", "Library/Application Support/Chromium"),
+            ("vivaldi", "Library/Application Support/Vivaldi"),
+            ("opera", "Library/Application Support/com.operasoftware.Opera"),
+            ("safari", "Library/Safari"),
+        ];
+        #[cfg(target_os = "windows")]
+        let probes: &[(&str, &str)] = &[
+            ("firefox", "AppData/Roaming/Mozilla/Firefox/Profiles"),
+            ("chrome", "AppData/Local/Google/Chrome/User Data"),
+            (
+                "brave",
+                "AppData/Local/BraveSoftware/Brave-Browser/User Data",
+            ),
+            ("edge", "AppData/Local/Microsoft/Edge/User Data"),
+            ("chromium", "AppData/Local/Chromium/User Data"),
+            ("vivaldi", "AppData/Local/Vivaldi/User Data"),
+            ("opera", "AppData/Roaming/Opera Software/Opera Stable"),
+        ];
+        #[cfg(all(unix, not(target_os = "macos")))]
+        let probes: &[(&str, &str)] = &[
+            ("firefox", ".mozilla/firefox"),
+            ("chrome", ".config/google-chrome"),
+            ("chromium", ".config/chromium"),
+            ("brave", ".config/BraveSoftware/Brave-Browser"),
+            ("edge", ".config/microsoft-edge"),
+            ("vivaldi", ".config/vivaldi"),
+            ("opera", ".config/opera"),
+        ];
+
+        probes
+            .iter()
+            .filter(|(_, rel)| home.join(rel).exists())
+            .map(|(name, _)| *name)
+            .collect()
+    }
+
+    /// Ordered `--cookies-from-browser` values to try on an auth wall:
+    /// the browser that last produced a working session (if still
+    /// installed) first, then the rest of `detected_browsers`, minus a
+    /// browser the user configured explicitly (the caller tries that one
+    /// itself).
+    fn auto_browser_attempts(&self) -> Vec<String> {
+        let configured = {
+            let cfg = self.cookies.read().unwrap();
+            cfg.browser.clone().filter(|b| !b.is_empty())
+        };
+        let last = self.auto_cookie_browser.read().unwrap().clone();
+        let detected = Self::detected_browsers();
+
+        let mut ordered: Vec<String> = Vec::new();
+        if let Some(l) = last {
+            if detected.iter().any(|d| *d == l) {
+                ordered.push(l);
+            }
+        }
+        for d in detected {
+            if !ordered.iter().any(|o| o == d) {
+                ordered.push(d.to_string());
+            }
+        }
+        ordered
+            .into_iter()
+            .filter(|b| Some(b.as_str()) != configured.as_deref())
+            .collect()
+    }
+
+    fn remember_auto_browser(&self, browser: &str) {
+        let mut w = self.auto_cookie_browser.write().unwrap();
+        if w.as_deref() != Some(browser) {
+            *w = Some(browser.to_string());
+        }
     }
 
     fn ytdlp_path() -> Result<PathBuf> {
@@ -73,19 +200,46 @@ impl YtdlpAdapter {
         msg.contains("cookies are no longer valid") || msg.contains("cookies have expired")
     }
 
-    /// Run yt-dlp with the given arguments and return the JSON stdout.
+    /// Run yt-dlp and return its JSON stdout, working through cookie
+    /// strategies as needed: the user's configured cookies first (falling
+    /// back to anonymous if yt-dlp says they've gone stale), then — only
+    /// if the request is refused for lack of a signed-in session — each
+    /// browser on this machine in turn, remembering whichever one works.
     async fn run_ytdlp_json(&self, args: &[&str]) -> Result<String> {
-        match self.run_ytdlp_json_inner(args, true).await {
-            Err(e) if Self::is_stale_cookie_error(&e.to_string()) => {
-                self.run_ytdlp_json_inner(args, false).await
+        let configured = self.cookie_arg();
+        let first = match self.run_ytdlp_json_inner(args, configured.clone()).await {
+            Err(e) if configured.is_some() && Self::is_stale_cookie_error(&e.to_string()) => {
+                self.run_ytdlp_json_inner(args, None).await
+            }
+            other => other,
+        };
+
+        match first {
+            Err(e) if Self::needs_auth(&e.to_string()) => {
+                for browser in self.auto_browser_attempts() {
+                    if let Ok(out) = self
+                        .run_ytdlp_json_inner(
+                            args,
+                            Some(("--cookies-from-browser", browser.clone())),
+                        )
+                        .await
+                    {
+                        self.remember_auto_browser(&browser);
+                        return Ok(out);
+                    }
+                }
+                Err(ProviderError::AuthRequired(AUTH_HELP.to_string()))
             }
             other => other,
         }
     }
 
-    async fn run_ytdlp_json_inner(&self, args: &[&str], use_cookies: bool) -> Result<String> {
+    async fn run_ytdlp_json_inner(
+        &self,
+        args: &[&str],
+        cookie_arg: Option<(&'static str, String)>,
+    ) -> Result<String> {
         let ytdlp = Self::ytdlp_path()?;
-        let cookie_arg = if use_cookies { self.cookie_arg() } else { None };
         let mut full_args: Vec<&str> = Vec::with_capacity(args.len() + 2);
         if let Some((flag, value)) = &cookie_arg {
             full_args.push(flag);
@@ -745,7 +899,11 @@ impl ProviderAdapter for YtdlpAdapter {
         // failed, which is exactly the info needed to diagnose a new
         // failure mode instead of guessing at it.
         let mut attempt_errors: Vec<String> = Vec::new();
-        let cookie_arg = self.cookie_arg();
+        let configured_cookie = self.cookie_arg();
+        // Set once a client has reported an auth wall and we've appended
+        // this machine's browsers to the cookie plan — so escalation
+        // happens at most once per fetch, not once per client.
+        let mut auth_escalated = false;
 
         let audio_quality = match format {
             "flac" | "wav" | "aiff" => "0",
@@ -794,29 +952,34 @@ impl ProviderAdapter for YtdlpAdapter {
                 &candidate.source_url,
             ];
 
-            // Try with cookies first (if configured); a stale/rotated
-            // cookie is worse than none, so retry the same client with no
-            // cookies before giving up on it — see `is_stale_cookie_error`.
-            let attempts: &[bool] = if cookie_arg.is_some() {
-                &[true, false]
-            } else {
-                &[false]
+            // Cookie strategies to try for this client, in order. Start
+            // with the user's configured cookies then anonymous (a
+            // stale/rotated cookie is worse than none — see
+            // `is_stale_cookie_error`); anonymous only if nothing is
+            // configured. The first time any client hits an auth wall,
+            // this machine's browsers are appended once — see `needs_auth`.
+            let mut cookie_plan: Vec<Option<(&str, String)>> = match &configured_cookie {
+                Some((flag, value)) => vec![Some((*flag, value.clone())), None],
+                None => vec![None],
             };
+            if auth_escalated {
+                for browser in self.auto_browser_attempts() {
+                    cookie_plan.push(Some(("--cookies-from-browser", browser)));
+                }
+            }
+
             let mut output = None;
-            for &use_cookies in attempts {
-                let cookie_args: Vec<&str> = if use_cookies {
-                    match &cookie_arg {
-                        Some((flag, value)) => vec![flag, value.as_str()],
-                        None => vec![],
-                    }
-                } else {
-                    vec![]
-                };
-                let args: Vec<&str> = cookie_args
-                    .iter()
-                    .chain(base_args.iter())
-                    .copied()
-                    .collect();
+            let mut plan_idx = 0;
+            while plan_idx < cookie_plan.len() {
+                let cookie = cookie_plan[plan_idx].clone();
+                plan_idx += 1;
+
+                let mut args: Vec<&str> = Vec::with_capacity(base_args.len() + 2);
+                if let Some((flag, value)) = &cookie {
+                    args.push(flag);
+                    args.push(value.as_str());
+                }
+                args.extend_from_slice(&base_args);
 
                 let attempt = tokio::process::Command::new(&ytdlp)
                     .args(&args)
@@ -826,13 +989,38 @@ impl ProviderAdapter for YtdlpAdapter {
                     .output()
                     .await?;
 
-                let stale_cookies = use_cookies
-                    && !attempt.status.success()
-                    && Self::is_stale_cookie_error(&String::from_utf8_lossy(&attempt.stderr));
-                output = Some(attempt);
-                if !stale_cookies {
+                if attempt.status.success() {
+                    if let Some(("--cookies-from-browser", browser)) = &cookie {
+                        self.remember_auto_browser(browser);
+                    }
+                    output = Some(attempt);
                     break;
                 }
+
+                let stderr = String::from_utf8_lossy(&attempt.stderr).to_string();
+
+                // Stale configured cookie: fall straight through to the
+                // next plan entry (anonymous), which is already queued.
+                if cookie.is_some() && Self::is_stale_cookie_error(&stderr) {
+                    output = Some(attempt);
+                    continue;
+                }
+
+                // First auth wall of this fetch: append the machine's
+                // browsers to the plan and keep going.
+                if !auth_escalated && Self::needs_auth(&stderr) {
+                    auth_escalated = true;
+                    for browser in self.auto_browser_attempts() {
+                        cookie_plan.push(Some(("--cookies-from-browser", browser)));
+                    }
+                    output = Some(attempt);
+                    continue;
+                }
+
+                // Any other failure: this client is done — trying more
+                // cookie variants for it won't change the outcome.
+                output = Some(attempt);
+                break;
             }
             let output = output.expect("at least one attempt always runs");
 
@@ -842,6 +1030,15 @@ impl ProviderAdapter for YtdlpAdapter {
             }
 
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+            // We hit an auth wall and no browser on this machine could
+            // satisfy it — a different player_client won't help, and this
+            // is the one failure the user can actually act on. Surface it
+            // plainly instead of a multi-client stderr dump.
+            if auth_escalated {
+                return Err(ProviderError::AuthRequired(AUTH_HELP.to_string()));
+            }
+
             let retryable = stderr.contains("403") || stderr.contains("Requested format");
             attempt_errors.push(format!("[{client}] {stderr}"));
             if !retryable || i == clients.len() - 1 {
@@ -962,6 +1159,51 @@ mod tests {
         assert!(!YtdlpAdapter::is_soundcloud_url(
             "https://youtube.com/watch?v=abc"
         ));
+    }
+
+    #[test]
+    fn needs_auth_matches_only_session_walls() {
+        assert!(YtdlpAdapter::needs_auth(
+            "ERROR: [youtube] abc: Sign in to confirm your age. Use --cookies-from-browser"
+        ));
+        assert!(YtdlpAdapter::needs_auth(
+            "Sign in to confirm you're not a bot"
+        ));
+        assert!(YtdlpAdapter::needs_auth("player response: LOGIN_REQUIRED"));
+        // Not auth walls — must not trigger browser-cookie probing.
+        assert!(!YtdlpAdapter::needs_auth(
+            "ERROR: [youtube] abc: Video unavailable"
+        ));
+        assert!(!YtdlpAdapter::needs_auth("HTTP Error 403: Forbidden"));
+        assert!(!YtdlpAdapter::needs_auth("Requested format is not available"));
+    }
+
+    #[test]
+    fn auto_browser_attempts_excludes_configured_browser() {
+        let p = YtdlpAdapter::new();
+        // With no browser configured, attempts are exactly what's detected.
+        assert_eq!(p.auto_browser_attempts(), {
+            YtdlpAdapter::detected_browsers()
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        });
+        // A configured browser is the caller's job to try, so it's dropped
+        // from the automatic list.
+        if let Some(first) = YtdlpAdapter::detected_browsers().first().copied() {
+            p.set_cookies_browser(Some(first.to_string()));
+            assert!(!p.auto_browser_attempts().iter().any(|b| b == first));
+        }
+    }
+
+    #[test]
+    fn remembered_browser_is_tried_first() {
+        let p = YtdlpAdapter::new();
+        let detected = YtdlpAdapter::detected_browsers();
+        if let Some(&last) = detected.get(1).or_else(|| detected.first()) {
+            p.remember_auto_browser(last);
+            assert_eq!(p.auto_browser_attempts().first().map(String::as_str), Some(last));
+        }
     }
 
     #[test]
