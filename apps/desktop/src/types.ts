@@ -175,6 +175,7 @@ export interface Diagnostics {
 }
 
 export interface SystemToolsStatus {
+  app_version: string;
   ytdlp_path: string | null;
   ytdlp_version: string | null;
   ffmpeg_path: string | null;

@@ -143,6 +143,10 @@ export function SettingsWorkspace() {
           <p className="text-xs text-parchment-dim">Checking tools…</p>
         ) : tools ? (
           <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-parchment">OpenDJ</span>
+              <span className="font-mono text-parchment-dim">v{tools.app_version}</span>
+            </div>
             <ToolRow
               name="yt-dlp"
               installed={!!tools.ytdlp_path}

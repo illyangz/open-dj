@@ -748,6 +748,7 @@ pub async fn check_system_tools() -> CmdResult<SystemToolsStatus> {
     };
 
     Ok(SystemToolsStatus {
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
         ytdlp_path: ytdlp_path.map(|p| p.to_string_lossy().to_string()),
         ytdlp_version,
         ffmpeg_path: ffmpeg_path.map(|p| p.to_string_lossy().to_string()),
@@ -757,6 +758,7 @@ pub async fn check_system_tools() -> CmdResult<SystemToolsStatus> {
 
 #[derive(Debug, Serialize)]
 pub struct SystemToolsStatus {
+    pub app_version: String,
     pub ytdlp_path: Option<String>,
     pub ytdlp_version: Option<String>,
     pub ffmpeg_path: Option<String>,
