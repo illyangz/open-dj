@@ -368,7 +368,7 @@ pub async fn generate_waveform(
             .await
             .map_err(|e| e.to_string())?;
 
-        let output = tokio::process::Command::new(&ffmpeg)
+        let output = opendj_providers::yt_dlp_bin::hidden(tokio::process::Command::new(&ffmpeg))
             .args([
                 "-y",
                 "-i",
@@ -719,7 +719,7 @@ pub async fn check_system_tools() -> CmdResult<SystemToolsStatus> {
     let ffmpeg_path = opendj_providers::yt_dlp_bin::find_ffmpeg();
 
     let ytdlp_version = if let Some(ref p) = ytdlp_path {
-        let output = tokio::process::Command::new(p)
+        let output = opendj_providers::yt_dlp_bin::hidden(tokio::process::Command::new(p))
             .arg("--version")
             .env("PATH", opendj_providers::yt_dlp_bin::augmented_path())
             .output()
@@ -732,7 +732,7 @@ pub async fn check_system_tools() -> CmdResult<SystemToolsStatus> {
     };
 
     let ffmpeg_version = if let Some(ref p) = ffmpeg_path {
-        let output = tokio::process::Command::new(p)
+        let output = opendj_providers::yt_dlp_bin::hidden(tokio::process::Command::new(p))
             .args(["-version"])
             .env("PATH", opendj_providers::yt_dlp_bin::augmented_path())
             .output()

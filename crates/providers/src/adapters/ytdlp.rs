@@ -321,7 +321,7 @@ impl YtdlpAdapter {
         }
         full_args.extend_from_slice(args);
 
-        let output = tokio::process::Command::new(&ytdlp)
+        let output = yt_dlp_bin::hidden(tokio::process::Command::new(&ytdlp))
             .args(&full_args)
             .env("PATH", yt_dlp_bin::augmented_path())
             .stdout(Stdio::piped())
@@ -1055,7 +1055,7 @@ impl ProviderAdapter for YtdlpAdapter {
                 }
                 args.extend_from_slice(&base_args);
 
-                let attempt = tokio::process::Command::new(&ytdlp)
+                let attempt = yt_dlp_bin::hidden(tokio::process::Command::new(&ytdlp))
                     .args(&args)
                     .env("PATH", yt_dlp_bin::augmented_path())
                     .stdout(Stdio::piped())

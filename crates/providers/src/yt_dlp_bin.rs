@@ -123,17 +123,48 @@ pub fn augmented_path() -> String {
     }
 }
 
-/// Look for a binary on the system PATH using the `which` command.
+/// `CREATE_NO_WINDOW` — keep Windows from opening a console window for a
+/// spawned child. Every yt-dlp/ffmpeg spawn (and there are several per
+/// queued track, with retries) otherwise flashes a `cmd.exe` window;
+/// enqueue a playlist and it's hundreds of them.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Apply `CREATE_NO_WINDOW` to an async `Command` on Windows; no-op
+/// elsewhere. Wrap every subprocess spawn in the app with this.
+#[cfg_attr(not(windows), allow(unused_mut))]
+pub fn hidden(mut cmd: tokio::process::Command) -> tokio::process::Command {
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
+/// Same, for a blocking `std::process::Command`.
+#[cfg_attr(not(windows), allow(unused_mut))]
+pub fn hidden_std(mut cmd: std::process::Command) -> std::process::Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+/// Look for a binary on the system PATH. Uses `which` on Unix and
+/// `where` on Windows (there is no `which` there).
 fn find_in_path(name: &str) -> Option<PathBuf> {
-    let output = std::process::Command::new("which")
-        .arg(name)
-        .output()
-        .ok()?;
+    let finder = if cfg!(windows) { "where" } else { "which" };
+    let mut cmd = std::process::Command::new(finder);
+    cmd.arg(name);
+    let output = hidden_std(cmd).output().ok()?;
     if output.status.success() {
-        let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !path_str.is_empty() {
-            return Some(PathBuf::from(path_str));
-        }
+        // `where` can print several matches, one per line — take the first.
+        let first = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())?
+            .to_string();
+        return Some(PathBuf::from(first));
     }
     None
 }

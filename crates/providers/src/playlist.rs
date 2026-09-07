@@ -130,7 +130,7 @@ pub async fn expand_playlist(url: &str) -> std::result::Result<Vec<PlaylistEntry
         )
     })?;
 
-    let output = tokio::process::Command::new(&ytdlp)
+    let output = yt_dlp_bin::hidden(tokio::process::Command::new(&ytdlp))
         .args([
             "--flat-playlist",
             "--dump-json",
