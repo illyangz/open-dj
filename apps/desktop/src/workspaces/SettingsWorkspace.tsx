@@ -179,11 +179,16 @@ export function SettingsWorkspace() {
         <p className="text-xs text-parchment-dim mb-3">
           Age-restricted videos and YouTube's "confirm you're not a bot" check need a
           signed-in session. OpenDJ handles this automatically: when a download hits one of
-          those walls, it borrows cookies from whichever browser on this computer you're
-          logged into YouTube with (trying Firefox first, then Chrome, Brave, Edge, Safari).
-          Chrome/Brave prompt once for your Mac login password (Keychain); Safari needs
-          OpenDJ granted Full Disk Access. The settings below only override that — leave them
-          empty unless auto-detection isn't working for you.
+          those walls, it borrows cookies from every browser profile on this computer you're
+          logged into YouTube with (Firefox first, then Chrome/Brave/Edge/Vivaldi profiles,
+          then Safari). Chromium browsers prompt once for your Mac login password (Keychain);
+          Safari needs OpenDJ granted Full Disk Access.
+        </p>
+        <p className="text-xs text-amber/80 mb-3">
+          If it still fails: <strong>fully quit the browser</strong> you're signed into
+          YouTube with, then retry. A running browser rotates its login cookies for security,
+          and OpenDJ only ever sees a stale copy. The fields below are a manual override —
+          leave them empty otherwise.
         </p>
         <FieldRow label="Cookies file (override)">
           <div className="flex items-center gap-2">

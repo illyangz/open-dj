@@ -43,7 +43,7 @@ pub struct YtdlpAdapter {
 /// this machine could supply one — the one download failure the user can
 /// actually act on, so it gets a plain-language message instead of raw
 /// yt-dlp stderr.
-const AUTH_HELP: &str = "This YouTube video needs a signed-in account — it's age-restricted, or YouTube flagged the request as automated. OpenDJ checked the web browsers on this computer but none had a usable YouTube session. Fix: sign in to YouTube in Chrome, Firefox, or Safari and retry — or set a cookies.txt file under Settings.";
+const AUTH_HELP: &str = "This YouTube video needs a signed-in account — it's age-restricted, or YouTube flagged the request as automated. OpenDJ tried every browser profile on this computer and couldn't get a working YouTube session from any of them. Most common fix: fully quit your browser and retry — a running browser rotates its login cookies for security and OpenDJ only ever sees a stale copy. Otherwise: sign in to YouTube in a browser and play one age-restricted video to confirm the account's age; for Safari, grant OpenDJ Full Disk Access in System Settings › Privacy & Security; or export a cookies.txt (from a fresh private-window login) and set it under Settings.";
 
 impl YtdlpAdapter {
     pub fn new() -> Self {
@@ -90,61 +90,129 @@ impl YtdlpAdapter {
             || msg.contains("age-restricted")
     }
 
-    /// Browsers with a profile directory present on this machine, as
-    /// yt-dlp `--cookies-from-browser` names, ordered by how much OS
-    /// friction reading their cookie store costs: Firefox needs no prompt
-    /// at all; Chromium-family browsers need the login keychain (a
-    /// one-time macOS prompt per browser); Safari needs Full Disk Access
-    /// granted to the app. `auto_browser_attempts` promotes whichever one
+    /// yt-dlp `--cookies-from-browser` targets to try on an auth wall, for
+    /// every browser actually set up on this machine — ordered by how much
+    /// OS friction reading the cookie store costs: Firefox needs no prompt;
+    /// Chromium-family browsers need the login keychain (a one-time macOS
+    /// prompt); Safari needs Full Disk Access granted to the app.
+    ///
+    /// For Chromium browsers each profile is listed explicitly
+    /// (`chrome:Default`, `chrome:Profile 1`, …) rather than the bare
+    /// `chrome` — a YouTube login very often lives in a secondary profile
+    /// (a work account, a second person), and the bare name only ever
+    /// reads `Default`. `auto_browser_attempts` promotes whichever target
     /// last worked to the front of this list.
-    fn detected_browsers() -> Vec<&'static str> {
+    fn detected_browsers() -> Vec<String> {
         let Some(home) = dirs::home_dir() else {
             return Vec::new();
         };
 
+        // (yt-dlp name, dir holding `Local State` + the profile folders)
         #[cfg(target_os = "macos")]
-        let probes: &[(&str, &str)] = &[
-            ("firefox", "Library/Application Support/Firefox/Profiles"),
-            ("chrome", "Library/Application Support/Google/Chrome"),
-            (
-                "brave",
-                "Library/Application Support/BraveSoftware/Brave-Browser",
-            ),
-            ("edge", "Library/Application Support/Microsoft Edge"),
-            ("chromium", "Library/Application Support/Chromium"),
-            ("vivaldi", "Library/Application Support/Vivaldi"),
-            ("opera", "Library/Application Support/com.operasoftware.Opera"),
-            ("safari", "Library/Safari"),
-        ];
+        let (chromium, firefox_ini): (&[(&str, &str)], &str) = (
+            &[
+                ("chrome", "Library/Application Support/Google/Chrome"),
+                (
+                    "brave",
+                    "Library/Application Support/BraveSoftware/Brave-Browser",
+                ),
+                ("edge", "Library/Application Support/Microsoft Edge"),
+                ("chromium", "Library/Application Support/Chromium"),
+                ("vivaldi", "Library/Application Support/Vivaldi"),
+                (
+                    "opera",
+                    "Library/Application Support/com.operasoftware.Opera",
+                ),
+            ],
+            "Library/Application Support/Firefox/profiles.ini",
+        );
         #[cfg(target_os = "windows")]
-        let probes: &[(&str, &str)] = &[
-            ("firefox", "AppData/Roaming/Mozilla/Firefox/Profiles"),
-            ("chrome", "AppData/Local/Google/Chrome/User Data"),
-            (
-                "brave",
-                "AppData/Local/BraveSoftware/Brave-Browser/User Data",
-            ),
-            ("edge", "AppData/Local/Microsoft/Edge/User Data"),
-            ("chromium", "AppData/Local/Chromium/User Data"),
-            ("vivaldi", "AppData/Local/Vivaldi/User Data"),
-            ("opera", "AppData/Roaming/Opera Software/Opera Stable"),
-        ];
+        let (chromium, firefox_ini): (&[(&str, &str)], &str) = (
+            &[
+                ("chrome", "AppData/Local/Google/Chrome/User Data"),
+                (
+                    "brave",
+                    "AppData/Local/BraveSoftware/Brave-Browser/User Data",
+                ),
+                ("edge", "AppData/Local/Microsoft/Edge/User Data"),
+                ("chromium", "AppData/Local/Chromium/User Data"),
+                ("vivaldi", "AppData/Local/Vivaldi/User Data"),
+                ("opera", "AppData/Roaming/Opera Software/Opera Stable"),
+            ],
+            "AppData/Roaming/Mozilla/Firefox/profiles.ini",
+        );
         #[cfg(all(unix, not(target_os = "macos")))]
-        let probes: &[(&str, &str)] = &[
-            ("firefox", ".mozilla/firefox"),
-            ("chrome", ".config/google-chrome"),
-            ("chromium", ".config/chromium"),
-            ("brave", ".config/BraveSoftware/Brave-Browser"),
-            ("edge", ".config/microsoft-edge"),
-            ("vivaldi", ".config/vivaldi"),
-            ("opera", ".config/opera"),
-        ];
+        let (chromium, firefox_ini): (&[(&str, &str)], &str) = (
+            &[
+                ("chrome", ".config/google-chrome"),
+                ("chromium", ".config/chromium"),
+                ("brave", ".config/BraveSoftware/Brave-Browser"),
+                ("edge", ".config/microsoft-edge"),
+                ("vivaldi", ".config/vivaldi"),
+                ("opera", ".config/opera"),
+            ],
+            ".mozilla/firefox/profiles.ini",
+        );
 
-        probes
-            .iter()
-            .filter(|(_, rel)| home.join(rel).exists())
-            .map(|(name, _)| *name)
-            .collect()
+        let mut out: Vec<String> = Vec::new();
+
+        // Firefox first: no OS unlock. yt-dlp picks the default profile.
+        if home.join(firefox_ini).is_file() {
+            out.push("firefox".to_string());
+        }
+
+        for (name, rel) in chromium {
+            let base = home.join(rel);
+            // `Local State` is written on first run and holds the profile
+            // list — its absence means the browser is installed but has
+            // never actually been used, so there are no cookies to read.
+            let local_state = base.join("Local State");
+            if !local_state.is_file() {
+                continue;
+            }
+            for profile in Self::chromium_profiles(&local_state) {
+                out.push(format!("{name}:{profile}"));
+            }
+        }
+
+        // Safari last: needs Full Disk Access granted to OpenDJ.
+        #[cfg(target_os = "macos")]
+        if home
+            .join("Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies")
+            .is_file()
+            || home.join("Library/Cookies/Cookies.binarycookies").is_file()
+        {
+            out.push("safari".to_string());
+        }
+
+        out
+    }
+
+    /// Profile folder names for a Chromium browser, read from its
+    /// `Local State` (`profile.info_cache` keys — "Default", "Profile 1",
+    /// …), with "Default" first. Falls back to just "Default" if the file
+    /// can't be read or parsed.
+    fn chromium_profiles(local_state: &Path) -> Vec<String> {
+        let fallback = || vec!["Default".to_string()];
+        let Ok(text) = std::fs::read_to_string(local_state) else {
+            return fallback();
+        };
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+            return fallback();
+        };
+        let Some(cache) = json
+            .get("profile")
+            .and_then(|p| p.get("info_cache"))
+            .and_then(|c| c.as_object())
+        else {
+            return fallback();
+        };
+        if cache.is_empty() {
+            return fallback();
+        }
+        let mut profiles: Vec<String> = cache.keys().cloned().collect();
+        profiles.sort_by_key(|k| (k != "Default", k.to_ascii_lowercase()));
+        profiles
     }
 
     /// Ordered `--cookies-from-browser` values to try on an auth wall:
@@ -162,18 +230,24 @@ impl YtdlpAdapter {
 
         let mut ordered: Vec<String> = Vec::new();
         if let Some(l) = last {
-            if detected.iter().any(|d| *d == l) {
+            if detected.contains(&l) {
                 ordered.push(l);
             }
         }
         for d in detected {
-            if !ordered.iter().any(|o| o == d) {
-                ordered.push(d.to_string());
+            if !ordered.contains(&d) {
+                ordered.push(d);
             }
         }
+        // Drop targets for a browser the user pinned in Settings — the
+        // caller tries that one itself. Match on the browser name, so
+        // pinning "chrome" also skips "chrome:Profile 1".
         ordered
             .into_iter()
-            .filter(|b| Some(b.as_str()) != configured.as_deref())
+            .filter(|b| match configured.as_deref() {
+                None => true,
+                Some(c) => b.split(':').next().unwrap_or(b) != c,
+            })
             .collect()
     }
 
@@ -1181,18 +1255,18 @@ mod tests {
     #[test]
     fn auto_browser_attempts_excludes_configured_browser() {
         let p = YtdlpAdapter::new();
-        // With no browser configured, attempts are exactly what's detected.
-        assert_eq!(p.auto_browser_attempts(), {
-            YtdlpAdapter::detected_browsers()
-                .into_iter()
-                .map(String::from)
-                .collect::<Vec<_>>()
-        });
-        // A configured browser is the caller's job to try, so it's dropped
-        // from the automatic list.
-        if let Some(first) = YtdlpAdapter::detected_browsers().first().copied() {
-            p.set_cookies_browser(Some(first.to_string()));
-            assert!(!p.auto_browser_attempts().iter().any(|b| b == first));
+        // With nothing configured, attempts are exactly what's detected.
+        assert_eq!(p.auto_browser_attempts(), YtdlpAdapter::detected_browsers());
+        // Pinning a browser in Settings drops all its targets from the
+        // automatic list (the caller tries that browser itself) — matched
+        // on the name, so "chrome" also excludes "chrome:Profile 1".
+        if let Some(first) = YtdlpAdapter::detected_browsers().first().cloned() {
+            let name = first.split(':').next().unwrap().to_string();
+            p.set_cookies_browser(Some(name.clone()));
+            assert!(p
+                .auto_browser_attempts()
+                .iter()
+                .all(|b| b.split(':').next().unwrap() != name));
         }
     }
 
@@ -1200,10 +1274,29 @@ mod tests {
     fn remembered_browser_is_tried_first() {
         let p = YtdlpAdapter::new();
         let detected = YtdlpAdapter::detected_browsers();
-        if let Some(&last) = detected.get(1).or_else(|| detected.first()) {
-            p.remember_auto_browser(last);
-            assert_eq!(p.auto_browser_attempts().first().map(String::as_str), Some(last));
+        if let Some(last) = detected.get(1).or_else(|| detected.first()).cloned() {
+            p.remember_auto_browser(&last);
+            assert_eq!(p.auto_browser_attempts().first(), Some(&last));
         }
+    }
+
+    #[test]
+    fn chromium_profiles_reads_info_cache() {
+        let dir = std::env::temp_dir().join(format!("odj-ls-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ls = dir.join("Local State");
+        std::fs::write(
+            &ls,
+            r#"{"profile":{"info_cache":{"Profile 2":{},"Default":{},"Profile 1":{}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            YtdlpAdapter::chromium_profiles(&ls),
+            vec!["Default", "Profile 1", "Profile 2"]
+        );
+        std::fs::write(&ls, "not json").unwrap();
+        assert_eq!(YtdlpAdapter::chromium_profiles(&ls), vec!["Default"]);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
