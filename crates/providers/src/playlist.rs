@@ -19,6 +19,104 @@ pub enum PlaylistError {
     YtdlpFailed(String),
     #[error("failed to parse yt-dlp output: {0}")]
     ParseError(String),
+    #[error("{0}")]
+    Http(String),
+}
+
+/// True for a Spotify playlist or album URL — the two collection shapes
+/// yt-dlp refuses outright (DRM) but whose public embed page still lists
+/// every track. A Spotify *track* URL is handled per-track downstream and
+/// must not match here.
+pub fn is_spotify_collection(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    (lower.contains("open.spotify.com/playlist/") || lower.contains("open.spotify.com/album/"))
+        || lower.starts_with("spotify:playlist:")
+        || lower.starts_with("spotify:album:")
+}
+
+/// Expand a Spotify playlist or album into its tracks by scraping the
+/// public embed page (`open.spotify.com/embed/<kind>/<id>`) — same
+/// no-login, no-API-key approach the yt-dlp adapter already uses for
+/// single Spotify tracks. Each returned entry points at the individual
+/// track URL, so the normal per-track Spotify→YouTube resolution runs for
+/// it. The embed page lists up to ~50 tracks; longer playlists are
+/// truncated to that (Spotify doesn't expose the rest without auth).
+pub async fn expand_spotify_collection(
+    url: &str,
+) -> std::result::Result<Vec<PlaylistEntry>, PlaylistError> {
+    let (kind, id) = parse_spotify_collection(url)
+        .ok_or_else(|| PlaylistError::Http("not a Spotify playlist or album URL".into()))?;
+
+    let embed = format!("https://open.spotify.com/embed/{kind}/{id}");
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+        .build()
+        .map_err(|e| PlaylistError::Http(e.to_string()))?;
+
+    let html = client
+        .get(&embed)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| PlaylistError::Http(e.to_string()))?
+        .text()
+        .await
+        .map_err(|e| PlaylistError::Http(e.to_string()))?;
+
+    const START: &str = "<script id=\"__NEXT_DATA__\" type=\"application/json\">";
+    let json_str = html
+        .split_once(START)
+        .and_then(|(_, rest)| rest.split_once("</script>"))
+        .map(|(json, _)| json)
+        .ok_or_else(|| PlaylistError::ParseError("no __NEXT_DATA__ in Spotify embed".into()))?;
+
+    let data: serde_json::Value =
+        serde_json::from_str(json_str).map_err(|e| PlaylistError::ParseError(e.to_string()))?;
+
+    let track_list = data["props"]["pageProps"]["state"]["data"]["entity"]["trackList"]
+        .as_array()
+        .ok_or_else(|| PlaylistError::ParseError("no trackList in Spotify embed".into()))?;
+
+    let entries = track_list
+        .iter()
+        .enumerate()
+        .filter_map(|(i, t)| {
+            let uri = t["uri"].as_str()?;
+            let track_id = uri.strip_prefix("spotify:track:")?;
+            Some(PlaylistEntry {
+                url: format!("https://open.spotify.com/track/{track_id}"),
+                title: t["title"].as_str().map(str::to_string),
+                artist: t["subtitle"].as_str().map(str::to_string),
+                duration_ms: t["duration"].as_u64(),
+                index: Some(i as u32 + 1),
+            })
+        })
+        .collect();
+
+    Ok(entries)
+}
+
+fn parse_spotify_collection(url: &str) -> Option<(&'static str, String)> {
+    let id_after = |marker: &str| -> Option<String> {
+        url.split(marker).nth(1).map(|rest| {
+            rest.chars()
+                .take_while(|c| c.is_alphanumeric())
+                .collect::<String>()
+        })
+    };
+    for (marker, kind) in [
+        ("open.spotify.com/playlist/", "playlist"),
+        ("spotify:playlist:", "playlist"),
+        ("open.spotify.com/album/", "album"),
+        ("spotify:album:", "album"),
+    ] {
+        if let Some(id) = id_after(marker) {
+            if !id.is_empty() {
+                return Some((kind, id));
+            }
+        }
+    }
+    None
 }
 
 /// Check if a URL looks like a playlist or album (vs a single track).
@@ -140,5 +238,49 @@ mod tests {
         assert!(!looks_like_playlist(
             "https://open.spotify.com/track/3n3Ppam7vgaVa1iaRUc9Lp"
         ));
+    }
+
+    #[test]
+    fn detects_spotify_collections() {
+        assert!(is_spotify_collection(
+            "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
+        ));
+        assert!(is_spotify_collection(
+            "https://open.spotify.com/album/4aawyAB9vmqN3uQ7FjRGTy?si=x"
+        ));
+        assert!(is_spotify_collection("spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"));
+        // A single track is resolved per-track, not as a collection.
+        assert!(!is_spotify_collection(
+            "https://open.spotify.com/track/3n3Ppam7vgaVa1iaRUc9Lp"
+        ));
+        assert!(!is_spotify_collection(
+            "https://www.youtube.com/playlist?list=PLxyz"
+        ));
+    }
+
+    #[tokio::test]
+    #[ignore = "network: hits open.spotify.com"]
+    async fn spotify_collection_expands_live() {
+        let entries =
+            expand_spotify_collection("https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M")
+                .await
+                .expect("expand");
+        assert!(entries.len() > 10, "got {} entries", entries.len());
+        assert!(entries[0].url.starts_with("https://open.spotify.com/track/"));
+        assert!(entries[0].title.is_some());
+        assert!(entries[0].artist.is_some());
+    }
+
+    #[test]
+    fn parses_spotify_collection_id() {
+        assert_eq!(
+            parse_spotify_collection("https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=a"),
+            Some(("playlist", "37i9dQZF1DXcBWIGoYBM5M".to_string()))
+        );
+        assert_eq!(
+            parse_spotify_collection("spotify:album:4aawyAB9vmqN3uQ7FjRGTy"),
+            Some(("album", "4aawyAB9vmqN3uQ7FjRGTy".to_string()))
+        );
+        assert_eq!(parse_spotify_collection("https://open.spotify.com/track/x"), None);
     }
 }

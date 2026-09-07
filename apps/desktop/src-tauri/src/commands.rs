@@ -31,8 +31,16 @@ pub async fn ingest_inputs(
 
     for input in &inputs {
         if input.kind == InputKind::Url && input.provider_id.as_deref() == Some("ytdlp") {
-            // Try to expand as playlist/album
-            match opendj_providers::playlist::expand_playlist(&input.raw_value).await {
+            // Try to expand as playlist/album. Spotify playlists/albums are
+            // scraped from Spotify's own embed page (yt-dlp refuses them as
+            // DRM); everything else — YouTube, SoundCloud sets, Bandcamp —
+            // goes through yt-dlp's flat-playlist extraction.
+            let expansion = if opendj_providers::playlist::is_spotify_collection(&input.raw_value) {
+                opendj_providers::playlist::expand_spotify_collection(&input.raw_value).await
+            } else {
+                opendj_providers::playlist::expand_playlist(&input.raw_value).await
+            };
+            match expansion {
                 Ok(entries) if entries.len() > 1 => {
                     // Create one job per track
                     for entry in &entries {
