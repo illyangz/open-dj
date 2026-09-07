@@ -15,6 +15,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_drag::init())
         .setup(|app| {
             let handle = app.handle();
             let data_dir = handle.path().app_data_dir().expect("resolve app data dir");
@@ -105,6 +106,7 @@ pub fn run() {
             commands::scan_library_folder,
             commands::write_text_file,
             commands::write_binary_file,
+            commands::drag_preview_icon,
             commands::get_settings,
             commands::update_settings,
             commands::check_system_tools,

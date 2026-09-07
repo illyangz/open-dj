@@ -93,6 +93,7 @@ export const api = {
   // as-is the way it would over a binary channel.
   writeBinaryFile: (path: string, content: Uint8Array) =>
     invoke<void>("write_binary_file", { path, content: Array.from(content) }),
+  dragPreviewIcon: () => invoke<string>("drag_preview_icon"),
 
   getSettings: () => invoke<Settings>("get_settings"),
   updateSettings: (settings: Settings) => invoke<void>("update_settings", { settings }),

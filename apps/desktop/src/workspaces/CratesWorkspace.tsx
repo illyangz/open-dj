@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { api } from "../lib/api";
+import { dragCrateById, dragCrateFiles } from "../lib/crateDrag";
 import { useAppStore } from "../store/useAppStore";
 import { useTrackAnalysis } from "../lib/useTrackAnalysis";
 import { KeyBadge } from "../components/KeyBadge";
@@ -159,7 +160,8 @@ export function CratesWorkspace() {
         <div className="p-4">
           <h1 className="font-display font-semibold text-lg">Crates</h1>
           <p className="text-xs text-parchment-dim mt-1">
-            Ordered track lists, exportable to Rekordbox or Serato.
+            Ordered track lists. Drag a crate straight into Serato, Rekordbox, or Finder, or
+            export a file below.
           </p>
         </div>
         <div className="px-4 pb-3 flex gap-1.5">
@@ -183,8 +185,14 @@ export function CratesWorkspace() {
             <li key={c.id}>
               <button
                 onClick={() => setSelectedId(c.id)}
+                draggable
+                onDragStart={(e) => {
+                  e.preventDefault();
+                  void dragCrateById(c.id);
+                }}
+                title="Drag into Serato, Rekordbox, or Finder"
                 className={[
-                  "w-full text-left rounded-md px-3 py-2 text-sm truncate transition-colors",
+                  "w-full text-left rounded-md px-3 py-2 text-sm truncate transition-colors cursor-grab active:cursor-grabbing",
                   selectedId === c.id
                     ? "bg-charcoal-700 text-signal"
                     : "text-parchment-dim hover:text-parchment hover:bg-charcoal-800",
@@ -223,8 +231,13 @@ export function CratesWorkspace() {
                     setRenameValue(selected.name);
                     setRenaming(true);
                   }}
+                  draggable={trackPaths.length > 0}
+                  onDragStart={(e) => {
+                    e.preventDefault();
+                    void dragCrateFiles(trackPaths);
+                  }}
                   className="font-display font-semibold text-xl cursor-text"
-                  title="Click to rename"
+                  title="Click to rename · drag into Serato, Rekordbox, or Finder"
                 >
                   {selected.name}
                 </h1>
@@ -333,7 +346,14 @@ function CrateTrackRow({
 }) {
   const { bpm, key } = useTrackAnalysis(path);
   return (
-    <li className="flex items-center justify-between gap-3 rounded-lg border border-charcoal-700 bg-charcoal-800/40 px-4 py-2.5">
+    <li
+      draggable={path.startsWith("/")}
+      onDragStart={(e) => {
+        e.preventDefault();
+        void dragCrateFiles([path]);
+      }}
+      className="flex items-center justify-between gap-3 rounded-lg border border-charcoal-700 bg-charcoal-800/40 px-4 py-2.5 cursor-grab active:cursor-grabbing"
+    >
       <div className="min-w-0">
         <p className="text-sm font-medium truncate">
           {job?.title ?? path}

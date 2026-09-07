@@ -645,9 +645,28 @@ pub async fn write_text_file(path: String, content: String) -> CmdResult<()> {
 /// placed on disk at a user-chosen path.
 #[tauri::command]
 pub async fn write_binary_file(path: String, content: Vec<u8>) -> CmdResult<()> {
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     tokio::fs::write(&path, content)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Materializes the drag-preview image (the app icon) to a temp file and
+/// returns its path. `tauri-plugin-drag`'s `startDrag` needs `icon` as a
+/// real filesystem path — it can't take embedded bytes — so we drop a
+/// copy next to the OS temp dir once and reuse it.
+#[tauri::command]
+pub fn drag_preview_icon() -> CmdResult<String> {
+    const ICON: &[u8] = include_bytes!("../icons/32x32.png");
+    let path = std::env::temp_dir().join("opendj-drag-icon.png");
+    if !path.exists() {
+        std::fs::write(&path, ICON).map_err(|e| e.to_string())?;
+    }
+    Ok(path.to_string_lossy().into_owned())
 }
 
 #[tauri::command]

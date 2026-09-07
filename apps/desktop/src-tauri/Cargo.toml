@@ -40,3 +40,4 @@ opendj-providers = { path = "../../../crates/providers" }
 opendj-organization = { path = "../../../crates/organization" }
 opendj-sync = { path = "../../../crates/sync" }
 opendj-stems = { path = "../../../crates/stems" }
+tauri-plugin-drag = "2"
