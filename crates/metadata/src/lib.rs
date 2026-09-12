@@ -2,8 +2,8 @@ use lofty::config::WriteOptions;
 use lofty::error::{FileEncodingError, FileParseError};
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::probe::Probe;
-use lofty::tag::{Accessor, ItemKey, Tag, TagType};
 use lofty::tag::items::Timestamp;
+use lofty::tag::{Accessor, ItemKey, Tag, TagType};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 

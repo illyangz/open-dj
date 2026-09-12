@@ -702,7 +702,9 @@ mod tests {
         let store = store();
         let inputs = parse_inputs("Daft Punk - One More Time", "paste");
         store.insert_input(&inputs[0]).unwrap();
-        let job = store.create_job(inputs[0].id, Some("spotify"), None).unwrap();
+        let job = store
+            .create_job(inputs[0].id, Some("spotify"), None)
+            .unwrap();
         assert_eq!(job.state, JobState::Waiting);
 
         let jobs = store.list_jobs().unwrap();
@@ -715,7 +717,9 @@ mod tests {
         let store = store();
         let inputs = parse_inputs("https://example.com/track.mp3", "paste");
         store.insert_input(&inputs[0]).unwrap();
-        let job = store.create_job(inputs[0].id, Some("direct_url"), None).unwrap();
+        let job = store
+            .create_job(inputs[0].id, Some("direct_url"), None)
+            .unwrap();
 
         let paused = store.pause_job(job.id).unwrap();
         assert_eq!(paused.state, JobState::Paused);

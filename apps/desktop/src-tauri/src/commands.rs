@@ -1051,13 +1051,16 @@ pub async fn export_diagnostics(state: State<'_, AppState>) -> CmdResult<Diagnos
 /// The file is permanently deleted (not backed up) since this is a user-
 /// initiated removal, not a mutation that needs undo support.
 #[tauri::command]
-pub async fn remove_from_library(
-    state: State<'_, AppState>,
-    path: String,
-) -> CmdResult<()> {
+pub async fn remove_from_library(state: State<'_, AppState>, path: String) -> CmdResult<()> {
     // Clean up DB references first (before deleting the file)
-    state.store.delete_cues_for_path(&path).map_err(|e| e.to_string())?;
-    state.store.delete_crate_tracks_for_path(&path).map_err(|e| e.to_string())?;
+    state
+        .store
+        .delete_cues_for_path(&path)
+        .map_err(|e| e.to_string())?;
+    state
+        .store
+        .delete_crate_tracks_for_path(&path)
+        .map_err(|e| e.to_string())?;
 
     // Delete the file from disk
     let _ = tokio::fs::remove_file(&path).await;
@@ -1079,9 +1082,7 @@ use opendj_organization::DuplicateGroup;
 /// Find duplicate groups from a list of scanned tracks. Tier 1 only
 /// (exact file checksum match). Returns groups with 2+ members.
 #[tauri::command]
-pub async fn find_duplicate_groups(
-    tracks: Vec<TrackFields>,
-) -> CmdResult<Vec<DuplicateGroup>> {
+pub async fn find_duplicate_groups(tracks: Vec<TrackFields>) -> CmdResult<Vec<DuplicateGroup>> {
     Ok(opendj_organization::find_duplicate_groups(&tracks))
 }
 
@@ -1102,7 +1103,8 @@ pub async fn merge_duplicate_group(
     for redundant in &redundant_paths {
         // 1. Union tags: read redundant's tags, merge into canonical
         if let Ok(redundant_probe) = opendj_metadata::probe(std::path::Path::new(redundant)) {
-            if let Ok(canonical_probe) = opendj_metadata::probe(std::path::Path::new(&canonical_path))
+            if let Ok(canonical_probe) =
+                opendj_metadata::probe(std::path::Path::new(&canonical_path))
             {
                 let mut merged = canonical_probe.tags;
                 let r_tags = redundant_probe.tags;
@@ -1131,10 +1133,7 @@ pub async fn merge_duplicate_group(
                 if merged.key.is_none() && r_tags.key.is_some() {
                     merged.key = r_tags.key;
                 }
-                let _ = opendj_metadata::write_tags(
-                    std::path::Path::new(&canonical_path),
-                    &merged,
-                );
+                let _ = opendj_metadata::write_tags(std::path::Path::new(&canonical_path), &merged);
             }
         }
 

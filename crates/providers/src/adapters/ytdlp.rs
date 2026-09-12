@@ -938,7 +938,12 @@ impl ProviderAdapter for YtdlpAdapter {
         Ok(vec![info.into_candidate(raw, false)])
     }
 
-    async fn fetch(&self, candidate: &TrackCandidate, dest_dir: &Path, format: &str) -> Result<PathBuf> {
+    async fn fetch(
+        &self,
+        candidate: &TrackCandidate,
+        dest_dir: &Path,
+        format: &str,
+    ) -> Result<PathBuf> {
         tokio::fs::create_dir_all(dest_dir).await?;
 
         // SoundCloud: direct API download (clean, no yt-dlp)
@@ -1030,7 +1035,7 @@ impl ProviderAdapter for YtdlpAdapter {
                 "--remote-components",
                 "ejs:npm",
             ];
-            
+
             // If we found deno (bundled or system), tell yt-dlp to use it
             // for YouTube's JS signature challenges.
             let deno_str;
@@ -1039,7 +1044,7 @@ impl ProviderAdapter for YtdlpAdapter {
                 base_args.push("--js-runtimes");
                 base_args.push(&deno_str);
             }
-            
+
             base_args.push(&candidate.source_url);
 
             // Cookie strategies to try for this client, in order. Start
@@ -1191,8 +1196,7 @@ fn find_latest_download(dir: &Path, format: &str) -> Result<PathBuf> {
             e.path()
                 .extension()
                 .map(|ext| {
-                    ext.to_string_lossy().to_ascii_lowercase()
-                        == format.to_ascii_lowercase()
+                    ext.to_string_lossy().to_ascii_lowercase() == format.to_ascii_lowercase()
                 })
                 .unwrap_or(false)
         })
@@ -1278,7 +1282,9 @@ mod tests {
             "ERROR: [youtube] abc: Video unavailable"
         ));
         assert!(!YtdlpAdapter::needs_auth("HTTP Error 403: Forbidden"));
-        assert!(!YtdlpAdapter::needs_auth("Requested format is not available"));
+        assert!(!YtdlpAdapter::needs_auth(
+            "Requested format is not available"
+        ));
     }
 
     #[test]

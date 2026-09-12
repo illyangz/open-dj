@@ -94,7 +94,9 @@ pub(crate) fn decode_cached(path: &Path) -> Result<DecodedAudio> {
 
     // Fast path: check cache
     {
-        let cache = decoded_cache().lock().map_err(|e| MetadataError::Analysis(e.to_string()))?;
+        let cache = decoded_cache()
+            .lock()
+            .map_err(|e| MetadataError::Analysis(e.to_string()))?;
         if let Some(cached) = cache.get(&key) {
             return Ok(DecodedAudio {
                 mono_samples: cached.mono_samples.clone(),
@@ -110,19 +112,24 @@ pub(crate) fn decode_cached(path: &Path) -> Result<DecodedAudio> {
 
     // Cache the result (evict oldest if full)
     {
-        let mut cache = decoded_cache().lock().map_err(|e| MetadataError::Analysis(e.to_string()))?;
+        let mut cache = decoded_cache()
+            .lock()
+            .map_err(|e| MetadataError::Analysis(e.to_string()))?;
         if cache.len() >= 3 {
             // Remove the first (oldest) entry
             if let Some(first_key) = cache.keys().next().cloned() {
                 cache.remove(&first_key);
             }
         }
-        cache.insert(key, DecodedAudio {
-            mono_samples: decoded.mono_samples.clone(),
-            interleaved_samples: decoded.interleaved_samples.clone(),
-            channels: decoded.channels,
-            sample_rate: decoded.sample_rate,
-        });
+        cache.insert(
+            key,
+            DecodedAudio {
+                mono_samples: decoded.mono_samples.clone(),
+                interleaved_samples: decoded.interleaved_samples.clone(),
+                channels: decoded.channels,
+                sample_rate: decoded.sample_rate,
+            },
+        );
     }
 
     Ok(decoded)

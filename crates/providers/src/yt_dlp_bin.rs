@@ -59,7 +59,10 @@ pub fn check_tools() -> Result<(PathBuf, PathBuf), MissingTool> {
         (Some(y), Some(f)) => Ok((y, f)),
         (Some(_), None) => Err(MissingTool::Ffmpeg),
         (None, Some(_)) => Err(MissingTool::Ytdlp),
-        (None, None) => Err(MissingTool::Multiple(&[MissingTool::Ytdlp, MissingTool::Ffmpeg])),
+        (None, None) => Err(MissingTool::Multiple(&[
+            MissingTool::Ytdlp,
+            MissingTool::Ffmpeg,
+        ])),
     }
 }
 
@@ -129,11 +132,11 @@ fn find_in_well_known_dirs(name: &str) -> Option<PathBuf> {
 /// solving failed") instead of erroring loudly.
 pub fn augmented_path() -> String {
     let existing = std::env::var("PATH").unwrap_or_default();
-    
+
     // Build list of extra paths: include bundled deno's parent dir first,
     // then well-known install dirs.
     let mut extra_parts: Vec<String> = Vec::new();
-    
+
     // If we found a bundled deno, add its parent directory to PATH so
     // yt-dlp can find it.
     if let Some(deno_path) = find_deno() {
@@ -141,14 +144,14 @@ pub fn augmented_path() -> String {
             extra_parts.push(deno_dir.to_string_lossy().to_string());
         }
     }
-    
+
     extra_parts.extend_from_slice(&[
         "/opt/homebrew/bin".to_string(),
         "/opt/homebrew/sbin".to_string(),
         "/usr/local/bin".to_string(),
         "/opt/local/bin".to_string(),
     ]);
-    
+
     let extra = extra_parts.join(":");
     if existing.is_empty() {
         extra

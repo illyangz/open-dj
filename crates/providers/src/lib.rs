@@ -78,7 +78,12 @@ pub trait ProviderAdapter: Send + Sync {
 
     /// Default: not supported. Adapters with a real, policy-permitted
     /// download path override this explicitly.
-    async fn fetch(&self, candidate: &TrackCandidate, dest_dir: &Path, format: &str) -> Result<PathBuf> {
+    async fn fetch(
+        &self,
+        candidate: &TrackCandidate,
+        dest_dir: &Path,
+        format: &str,
+    ) -> Result<PathBuf> {
         let _ = (candidate, dest_dir, format);
         Err(ProviderError::NotSupported(self.id()))
     }

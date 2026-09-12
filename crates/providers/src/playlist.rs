@@ -248,7 +248,9 @@ mod tests {
         assert!(is_spotify_collection(
             "https://open.spotify.com/album/4aawyAB9vmqN3uQ7FjRGTy?si=x"
         ));
-        assert!(is_spotify_collection("spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"));
+        assert!(is_spotify_collection(
+            "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"
+        ));
         // A single track is resolved per-track, not as a collection.
         assert!(!is_spotify_collection(
             "https://open.spotify.com/track/3n3Ppam7vgaVa1iaRUc9Lp"
@@ -266,7 +268,9 @@ mod tests {
                 .await
                 .expect("expand");
         assert!(entries.len() > 10, "got {} entries", entries.len());
-        assert!(entries[0].url.starts_with("https://open.spotify.com/track/"));
+        assert!(entries[0]
+            .url
+            .starts_with("https://open.spotify.com/track/"));
         assert!(entries[0].title.is_some());
         assert!(entries[0].artist.is_some());
     }
@@ -274,13 +278,18 @@ mod tests {
     #[test]
     fn parses_spotify_collection_id() {
         assert_eq!(
-            parse_spotify_collection("https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=a"),
+            parse_spotify_collection(
+                "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=a"
+            ),
             Some(("playlist", "37i9dQZF1DXcBWIGoYBM5M".to_string()))
         );
         assert_eq!(
             parse_spotify_collection("spotify:album:4aawyAB9vmqN3uQ7FjRGTy"),
             Some(("album", "4aawyAB9vmqN3uQ7FjRGTy".to_string()))
         );
-        assert_eq!(parse_spotify_collection("https://open.spotify.com/track/x"), None);
+        assert_eq!(
+            parse_spotify_collection("https://open.spotify.com/track/x"),
+            None
+        );
     }
 }
