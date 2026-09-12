@@ -46,6 +46,7 @@ jobs:
     # https://github.com/yt-dlp/yt-dlp/releases for the latest tag.
     env:
       YTDLP_VERSION: "2026.08.19"
+      DENO_VERSION: "2.9.6"
     strategy:
       fail-fast: false
       matrix:
@@ -147,7 +148,7 @@ jobs:
       # `otool -L`, so it's genuinely self-contained on any Mac, unlike a
       # `brew install ffmpeg` binary (which dynamically links dozens of
       # Homebrew-path dylibs that don't exist on a user's machine at all).
-      - name: Stage ffmpeg + yt-dlp (macOS)
+      - name: Stage ffmpeg + yt-dlp + deno (macOS)
         if: matrix.platform == 'macos-latest'
         run: |
           set -euxo pipefail
@@ -159,8 +160,13 @@ jobs:
           curl -L -o apps/desktop/src-tauri/binaries/yt-dlp-aarch64-apple-darwin \
             "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp_macos"
           chmod +x apps/desktop/src-tauri/binaries/yt-dlp-aarch64-apple-darwin
+          curl -L -o /tmp/deno.zip \
+            "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-aarch64-apple-darwin.zip"
+          unzip -o /tmp/deno.zip -d /tmp/deno-extract
+          cp /tmp/deno-extract/deno apps/desktop/src-tauri/binaries/deno-aarch64-apple-darwin
+          chmod +x apps/desktop/src-tauri/binaries/deno-aarch64-apple-darwin
 
-      - name: Stage ffmpeg + yt-dlp (Linux)
+      - name: Stage ffmpeg + yt-dlp + deno (Linux)
         if: matrix.platform == 'ubuntu-latest'
         run: |
           set -euxo pipefail
@@ -179,8 +185,13 @@ jobs:
           curl -L -o apps/desktop/src-tauri/binaries/yt-dlp-x86_64-unknown-linux-gnu \
             "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp_linux"
           chmod +x apps/desktop/src-tauri/binaries/yt-dlp-x86_64-unknown-linux-gnu
+          curl -L -o /tmp/deno.zip \
+            "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip"
+          unzip -o /tmp/deno.zip -d /tmp/deno-extract
+          cp /tmp/deno-extract/deno apps/desktop/src-tauri/binaries/deno-x86_64-unknown-linux-gnu
+          chmod +x apps/desktop/src-tauri/binaries/deno-x86_64-unknown-linux-gnu
 
-      - name: Stage ffmpeg + yt-dlp (Windows)
+      - name: Stage ffmpeg + yt-dlp + deno (Windows)
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
@@ -209,8 +220,12 @@ jobs:
             Copy-Item $ffmpegExe.FullName apps/desktop/src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe
             Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/download/$env:YTDLP_VERSION/yt-dlp.exe" `
               -OutFile apps/desktop/src-tauri/binaries/yt-dlp-x86_64-pc-windows-msvc.exe
+            Invoke-WebRequest -Uri "https://github.com/denoland/deno/releases/download/v$env:DENO_VERSION/deno-x86_64-pc-windows-msvc.zip" `
+              -OutFile deno.zip
+            Expand-Archive -Path deno.zip -DestinationPath deno-extract
+            Copy-Item deno-extract/deno.exe apps/desktop/src-tauri/binaries/deno-x86_64-pc-windows-msvc.exe
           } catch {
-            Write-Host "::error::Stage ffmpeg + yt-dlp (Windows) failed: $($_.Exception.Message)"
+            Write-Host "::error::Stage ffmpeg + yt-dlp + deno (Windows) failed: $($_.Exception.Message)"
             exit 1
           }
 

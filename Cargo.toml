@@ -30,4 +30,4 @@ rusqlite = { version = "0.31", features = ["bundled", "chrono"] }
 sha2 = "0.10"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 async-trait = "0.1"
-lofty = "0.21"
+lofty = "0.25"

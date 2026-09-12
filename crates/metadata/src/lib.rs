@@ -1,14 +1,18 @@
 use lofty::config::WriteOptions;
+use lofty::error::{FileEncodingError, FileParseError};
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::probe::Probe;
 use lofty::tag::{Accessor, ItemKey, Tag, TagType};
+use lofty::tag::items::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MetadataError {
     #[error("audio probe failed: {0}")]
-    Probe(#[from] lofty::error::LoftyError),
+    Probe(#[from] FileParseError),
+    #[error("failed to write tags: {0}")]
+    Encode(#[from] FileEncodingError),
     #[error("file has no readable audio track")]
     NoAudioTrack,
     #[error("audio analysis failed: {0}")]
@@ -30,7 +34,7 @@ pub struct TagFields {
     pub artist: Option<String>,
     pub album: Option<String>,
     pub genre: Option<String>,
-    pub year: Option<u32>,
+    pub year: Option<u16>,
     pub track_number: Option<u32>,
     /// Beats per minute, read from the file's own BPM tag (TBPM/tmpo/BPM
     /// comment) when the source already embedded it. Not computed from the
@@ -77,20 +81,22 @@ pub fn probe(path: &Path) -> Result<AudioProbe> {
 
 fn tag_fields_from(tag: &Tag) -> TagFields {
     let bpm = tag
-        .get_string(&ItemKey::Bpm)
-        .or_else(|| tag.get_string(&ItemKey::IntegerBpm))
+        .get_string(ItemKey::Bpm)
+        .or_else(|| tag.get_string(ItemKey::IntegerBpm))
         .and_then(|s| s.trim().parse::<f64>().ok());
     let key = tag
-        .get_string(&ItemKey::InitialKey)
+        .get_string(ItemKey::InitialKey)
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+
+    let year = tag.date().map(|d| d.year);
 
     TagFields {
         title: tag.title().map(|s| s.to_string()),
         artist: tag.artist().map(|s| s.to_string()),
         album: tag.album().map(|s| s.to_string()),
         genre: tag.genre().map(|s| s.to_string()),
-        year: tag.year(),
+        year,
         track_number: tag.track(),
         bpm,
         key,
@@ -130,7 +136,14 @@ fn apply_fields(tag: &mut Tag, fields: &TagFields) {
         tag.set_genre(genre.clone());
     }
     if let Some(year) = fields.year {
-        tag.set_year(year);
+        tag.set_date(Timestamp {
+            year,
+            month: None,
+            day: None,
+            hour: None,
+            minute: None,
+            second: None,
+        });
     }
     if let Some(track) = fields.track_number {
         tag.set_track(track);

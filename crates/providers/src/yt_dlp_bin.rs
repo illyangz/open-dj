@@ -4,7 +4,8 @@ use std::path::PathBuf;
 pub enum MissingTool {
     Ytdlp,
     Ffmpeg,
-    Both,
+    Deno,
+    Multiple(&'static [MissingTool]),
 }
 
 impl std::fmt::Display for MissingTool {
@@ -12,7 +13,11 @@ impl std::fmt::Display for MissingTool {
         match self {
             MissingTool::Ytdlp => write!(f, "yt-dlp"),
             MissingTool::Ffmpeg => write!(f, "ffmpeg"),
-            MissingTool::Both => write!(f, "yt-dlp and ffmpeg"),
+            MissingTool::Deno => write!(f, "deno"),
+            MissingTool::Multiple(tools) => {
+                let names: Vec<_> = tools.iter().map(|t| t.to_string()).collect();
+                write!(f, "{}", names.join(" and "))
+            }
         }
     }
 }
@@ -35,6 +40,15 @@ pub fn find_ffmpeg() -> Option<PathBuf> {
         .or_else(|| find_in_well_known_dirs("ffmpeg"))
 }
 
+/// Resolve the deno binary path. Checks the app bundle resources
+/// directory, then the system PATH, then well-known install locations
+/// directly.
+pub fn find_deno() -> Option<PathBuf> {
+    find_in_bundle("deno")
+        .or_else(|| find_in_path("deno"))
+        .or_else(|| find_in_well_known_dirs("deno"))
+}
+
 /// Check that both yt-dlp and ffmpeg are available. Returns their paths
 /// on success, or which tool is missing.
 pub fn check_tools() -> Result<(PathBuf, PathBuf), MissingTool> {
@@ -45,7 +59,7 @@ pub fn check_tools() -> Result<(PathBuf, PathBuf), MissingTool> {
         (Some(y), Some(f)) => Ok((y, f)),
         (Some(_), None) => Err(MissingTool::Ffmpeg),
         (None, Some(_)) => Err(MissingTool::Ytdlp),
-        (None, None) => Err(MissingTool::Both),
+        (None, None) => Err(MissingTool::Multiple(&[MissingTool::Ytdlp, MissingTool::Ffmpeg])),
     }
 }
 
@@ -115,9 +129,29 @@ fn find_in_well_known_dirs(name: &str) -> Option<PathBuf> {
 /// solving failed") instead of erroring loudly.
 pub fn augmented_path() -> String {
     let existing = std::env::var("PATH").unwrap_or_default();
-    let extra = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/opt/local/bin";
+    
+    // Build list of extra paths: include bundled deno's parent dir first,
+    // then well-known install dirs.
+    let mut extra_parts: Vec<String> = Vec::new();
+    
+    // If we found a bundled deno, add its parent directory to PATH so
+    // yt-dlp can find it.
+    if let Some(deno_path) = find_deno() {
+        if let Some(deno_dir) = deno_path.parent() {
+            extra_parts.push(deno_dir.to_string_lossy().to_string());
+        }
+    }
+    
+    extra_parts.extend_from_slice(&[
+        "/opt/homebrew/bin".to_string(),
+        "/opt/homebrew/sbin".to_string(),
+        "/usr/local/bin".to_string(),
+        "/opt/local/bin".to_string(),
+    ]);
+    
+    let extra = extra_parts.join(":");
     if existing.is_empty() {
-        extra.to_string()
+        extra
     } else {
         format!("{existing}:{extra}")
     }

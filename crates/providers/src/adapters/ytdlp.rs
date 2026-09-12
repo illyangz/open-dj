@@ -954,6 +954,10 @@ impl ProviderAdapter for YtdlpAdapter {
             "ffmpeg not found. This shouldn't happen in an official build — try reinstalling OpenDJ. Running from source? brew install ffmpeg",
         ))?;
 
+        // YouTube requires a JS runtime for signature challenges. Prefer
+        // the bundled deno, fall back to system PATH.
+        let deno_path = yt_dlp_bin::find_deno();
+
         // YouTube's default/android_vr clients will list formats fine but then
         // 403 on the actual byte fetch unless a PO Token is supplied (we
         // don't run a token provider). No single fallback client is
@@ -1001,7 +1005,7 @@ impl ProviderAdapter for YtdlpAdapter {
             let ffmpeg_str = ffmpeg_path.to_string_lossy();
             let output_str = output_template.to_string_lossy();
             let client_arg = format!("youtube:player_client={client}");
-            let base_args = [
+            let mut base_args: Vec<&str> = vec![
                 "-f",
                 ytdlp_format,
                 "-x",
@@ -1023,8 +1027,20 @@ impl ProviderAdapter for YtdlpAdapter {
                 "%(album)s:%(meta_album)s",
                 "--extractor-args",
                 &client_arg,
-                &candidate.source_url,
+                "--remote-components",
+                "ejs:npm",
             ];
+            
+            // If we found deno (bundled or system), tell yt-dlp to use it
+            // for YouTube's JS signature challenges.
+            let deno_str;
+            if let Some(ref deno) = deno_path {
+                deno_str = format!("deno:{}", deno.to_string_lossy());
+                base_args.push("--js-runtimes");
+                base_args.push(&deno_str);
+            }
+            
+            base_args.push(&candidate.source_url);
 
             // Cookie strategies to try for this client, in order. Start
             // with the user's configured cookies then anonymous (a
@@ -1111,6 +1127,19 @@ impl ProviderAdapter for YtdlpAdapter {
             // plainly instead of a multi-client stderr dump.
             if auth_escalated {
                 return Err(ProviderError::AuthRequired(AUTH_HELP.to_string()));
+            }
+
+            // YouTube requires a JavaScript runtime (deno/node) to solve
+            // signature challenges. If none is available, all clients fail
+            // with "Signature solving failed" — no point trying the rest.
+            if stderr.contains("Signature solving failed")
+                || stderr.contains("n challenge solving failed")
+            {
+                return Err(ProviderError::NotConfigured(
+                    "YouTube downloads require a JavaScript runtime (deno or node). \
+                     Install deno: https://deno.com/#installation \
+                     Or install node: https://nodejs.org",
+                ));
             }
 
             let retryable = stderr.contains("403") || stderr.contains("Requested format");
