@@ -285,7 +285,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euxo pipefail
-          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern "*.dmg" --output OpenDJ-macOS.dmg --clobber
+          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern "*${{ github.ref_name }}*.dmg" --output OpenDJ-macOS.dmg --clobber
           gh release upload "${{ github.ref_name }}" OpenDJ-macOS.dmg --clobber --repo "${{ github.repository }}"
 
       - name: Upload stable-named download link (Windows)
@@ -294,7 +294,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
-          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern "*.exe" --output OpenDJ-Windows.exe --clobber
+          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern "*${{ github.ref_name }}*.exe" --output OpenDJ-Windows.exe --clobber
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           gh release upload "${{ github.ref_name }}" OpenDJ-Windows.exe --clobber --repo "${{ github.repository }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -305,5 +305,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euxo pipefail
-          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern "*.AppImage" --output OpenDJ-Linux.AppImage --clobber
+          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern "*${{ github.ref_name }}*.AppImage" --output OpenDJ-Linux.AppImage --clobber
           gh release upload "${{ github.ref_name }}" OpenDJ-Linux.AppImage --clobber --repo "${{ github.repository }}"
