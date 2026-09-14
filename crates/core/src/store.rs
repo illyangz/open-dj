@@ -123,6 +123,10 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM jobs WHERE id = ?1", params![id.to_string()])?;
         conn.execute(
+            "DELETE FROM crate_inputs WHERE input_id = ?1",
+            params![job.input_id.to_string()],
+        )?;
+        conn.execute(
             "DELETE FROM inputs WHERE id = ?1",
             params![job.input_id.to_string()],
         )?;
@@ -478,6 +482,10 @@ impl Store {
             "DELETE FROM crate_tracks WHERE crate_id = ?1",
             params![id.to_string()],
         )?;
+        conn.execute(
+            "DELETE FROM crate_inputs WHERE crate_id = ?1",
+            params![id.to_string()],
+        )?;
         conn.execute("DELETE FROM crates WHERE id = ?1", params![id.to_string()])?;
         Ok(())
     }
@@ -516,6 +524,31 @@ impl Store {
             params![crate_id.to_string(), track_path, next_position],
         )?;
         Ok(())
+    }
+
+    /// Record that the job created for `input_id` should, on completion,
+    /// auto-add its downloaded file to `crate_id` (used by "save this
+    /// playlist as a crate").
+    pub fn link_input_to_crate(&self, crate_id: Uuid, input_id: Uuid) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO crate_inputs (crate_id, input_id) VALUES (?1, ?2)
+             ON CONFLICT(crate_id, input_id) DO NOTHING",
+            params![crate_id.to_string(), input_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    /// The crates a given input is supposed to land in once its job
+    /// completes. Returns a Vec to stay future-proof if an input is ever
+    /// linked to more than one crate.
+    pub fn crate_ids_for_input(&self, input_id: Uuid) -> Result<Vec<Uuid>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT crate_id FROM crate_inputs WHERE input_id = ?1")?;
+        let ids: Vec<String> = stmt
+            .query_map(params![input_id.to_string()], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(ids.iter().filter_map(|s| Uuid::parse_str(s).ok()).collect())
     }
 
     pub fn remove_track_from_crate(&self, crate_id: Uuid, track_path: &str) -> Result<()> {
@@ -700,7 +733,7 @@ mod tests {
     #[test]
     fn create_and_list_jobs_round_trips() {
         let store = store();
-        let inputs = parse_inputs("Daft Punk - One More Time", "paste");
+        let inputs = parse_inputs("Daft Punk - One More Time", "paste", false);
         store.insert_input(&inputs[0]).unwrap();
         let job = store
             .create_job(inputs[0].id, Some("spotify"), None)
@@ -715,7 +748,7 @@ mod tests {
     #[test]
     fn pause_resume_cancel_retry_state_machine() {
         let store = store();
-        let inputs = parse_inputs("https://example.com/track.mp3", "paste");
+        let inputs = parse_inputs("https://example.com/track.mp3", "paste", false);
         store.insert_input(&inputs[0]).unwrap();
         let job = store
             .create_job(inputs[0].id, Some("direct_url"), None)
@@ -746,7 +779,7 @@ mod tests {
         {
             let conn = db::open(&db_path).unwrap();
             let store = Store::new(conn);
-            let inputs = parse_inputs("Daft Punk - One More Time", "paste");
+            let inputs = parse_inputs("Daft Punk - One More Time", "paste", false);
             store.insert_input(&inputs[0]).unwrap();
             store.create_job(inputs[0].id, None, None).unwrap();
         }

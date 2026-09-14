@@ -90,8 +90,12 @@ interface AppStore {
    * copy would sit at a different array index than the live one, so the
    * queue keeps showing a phantom "active" row for a track that already
    * finished downloading. */
-  enqueue: (text: string) => Promise<Job[]>;
-  ingest: (text: string) => Promise<void>;
+  enqueue: (text: string, crateName?: string) => Promise<Job[]>;
+  ingest: (text: string, crateName?: string) => Promise<void>;
+
+  /** Bias search queries toward extended / dj-mix versions. */
+  extendedVersions: boolean;
+  setExtendedVersions: (on: boolean) => void;
 
   providers: ProviderInfo[];
   refreshProviders: () => Promise<void>;
@@ -176,9 +180,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
       selectedJobId: idSet.has(state.selectedJobId ?? "") ? null : state.selectedJobId,
     }));
   },
-  enqueue: async (text: string) => {
+  enqueue: async (text: string, crateName?: string) => {
     const format = get().selectedFormat;
-    const created = await api.ingestInputs(text, format);
+    const extended = get().extendedVersions;
+    const created =
+      crateName && crateName.trim()
+        ? (await api.ingestInputsAsCrate(crateName.trim(), text, format, extended))[1]
+        : await api.ingestInputs(text, format, extended);
     if (created.length > 0) {
       set((state) => {
         const existingIds = new Set(state.jobs.map((j) => j.id));
@@ -188,8 +196,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     return created;
   },
-  ingest: async (text: string) => {
-    const created = await get().enqueue(text);
+  ingest: async (text: string, crateName?: string) => {
+    const created = await get().enqueue(text, crateName);
     if (created.length === 0) return;
     set({ selectedJobId: created[0].id, workspace: "queue" });
   },
@@ -289,6 +297,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   selectedFormat: "mp3",
   setSelectedFormat: (fmt) => set({ selectedFormat: fmt }),
+
+  extendedVersions: false,
+  setExtendedVersions: (on) => set({ extendedVersions: on }),
 
   soundcloud: (() => {
     const cached = loadSoundcloudCache();

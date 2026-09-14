@@ -74,6 +74,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::ingest_inputs,
+            commands::ingest_inputs_as_crate,
             commands::list_jobs,
             commands::pause_job,
             commands::resume_job,
@@ -106,6 +107,7 @@ pub fn run() {
             commands::scan_library_folder,
             commands::write_text_file,
             commands::write_binary_file,
+            commands::read_playlist_file,
             commands::drag_preview_icon,
             commands::get_settings,
             commands::update_settings,

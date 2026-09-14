@@ -29,8 +29,20 @@ import type {
 } from "../types";
 
 export const api = {
-  ingestInputs: (text: string, format?: string) =>
-    invoke<Job[]>("ingest_inputs", { text, format: format ?? null }),
+  ingestInputs: (text: string, format?: string, extended?: boolean) =>
+    invoke<Job[]>("ingest_inputs", {
+      text,
+      format: format ?? null,
+      extended: extended ?? false,
+    }),
+  ingestInputsAsCrate: (name: string, text: string, format?: string, extended?: boolean) =>
+    invoke<[Crate, Job[]]>("ingest_inputs_as_crate", {
+      name,
+      text,
+      format: format ?? null,
+      extended: extended ?? false,
+    }),
+  readPlaylistFile: (path: string) => invoke<string>("read_playlist_file", { path }),
   listJobs: () => invoke<Job[]>("list_jobs"),
   pauseJob: (id: string) => invoke<Job>("pause_job", { id }),
   resumeJob: (id: string) => invoke<Job>("resume_job", { id }),

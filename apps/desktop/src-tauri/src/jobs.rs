@@ -30,6 +30,18 @@ pub fn spawn(app: AppHandle, job_id: Uuid) {
     });
 }
 
+/// FR: "save this playlist as a crate" — when a finished job lands on a
+/// file, add that file to every crate the user linked the job's input to
+/// at ingest time. Idempotent (`add_track_to_crate` is a no-op if the
+/// track is already a member), so it's safe to run on every completion.
+fn sync_crate_memberships(state: &AppState, input_id: Uuid, destination: &str) {
+    if let Ok(ids) = state.store.crate_ids_for_input(input_id) {
+        for crate_id in ids {
+            let _ = state.store.add_track_to_crate(crate_id, destination);
+        }
+    }
+}
+
 async fn run(app: &AppHandle, state: &AppState, job_id: Uuid) -> Result<(), String> {
     // A job may have been cancelled or paused while queued behind the
     // concurrency semaphore; re-check before doing any work.
@@ -85,6 +97,9 @@ async fn run(app: &AppHandle, state: &AppState, job_id: Uuid) -> Result<(), Stri
         job.state = JobState::Complete;
         job.progress = 1.0;
         state.store.save_job(&job).map_err(|e| e.to_string())?;
+        if let Some(dest) = &job.destination {
+            sync_crate_memberships(state, job.input_id, dest);
+        }
         return Ok(());
     }
 
@@ -117,5 +132,8 @@ async fn run(app: &AppHandle, state: &AppState, job_id: Uuid) -> Result<(), Stri
     job.state = JobState::Complete;
     job.progress = 1.0;
     state.store.save_job(&job).map_err(|e| e.to_string())?;
+    if let Some(dest) = job.destination.clone() {
+        sync_crate_memberships(state, job.input_id, &dest);
+    }
     Ok(())
 }

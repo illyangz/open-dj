@@ -24,10 +24,62 @@ pub async fn ingest_inputs(
     state: State<'_, AppState>,
     text: String,
     format: Option<String>,
+    extended: bool,
 ) -> CmdResult<Vec<Job>> {
-    let inputs = opendj_core::ingest::parse_inputs(&text, "paste");
+    enqueue_inputs(
+        &app,
+        state.inner(),
+        &text,
+        format.as_deref(),
+        extended,
+        None,
+    )
+    .await
+}
+
+/// FR: "save this playlist as a crate" — like `ingest_inputs`, but also
+/// creates a crate named `name` and links every created input to it so the
+/// job engine auto-populates the crate with each downloaded file the
+/// moment it finishes.
+#[tauri::command]
+pub async fn ingest_inputs_as_crate(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+    text: String,
+    format: Option<String>,
+    extended: bool,
+) -> CmdResult<(Crate, Vec<Job>)> {
+    let clean = name.trim();
+    if clean.is_empty() {
+        return Err("Crate name cannot be empty".to_string());
+    }
+    let crate_item = state.store.create_crate(clean).map_err(|e| e.to_string())?;
+    let jobs = enqueue_inputs(
+        &app,
+        state.inner(),
+        &text,
+        format.as_deref(),
+        extended,
+        Some(crate_item.id),
+    )
+    .await?;
+    Ok((crate_item, jobs))
+}
+
+/// Shared ingest pipeline behind `ingest_inputs` and
+/// `ingest_inputs_as_crate`. When `crate_id` is set, each created input is
+/// linked to that crate so completed downloads populate it automatically.
+async fn enqueue_inputs(
+    app: &AppHandle,
+    state: &AppState,
+    text: &str,
+    format: Option<&str>,
+    extended: bool,
+    crate_id: Option<Uuid>,
+) -> CmdResult<Vec<Job>> {
+    let inputs = opendj_core::ingest::parse_inputs(text, "paste", extended);
     let mut jobs = Vec::with_capacity(inputs.len());
-    let format_str = format.as_deref();
 
     for input in &inputs {
         if input.kind == InputKind::Url && input.provider_id.as_deref() == Some("ytdlp") {
@@ -57,9 +109,15 @@ pub async fn ingest_inputs(
                             .store
                             .insert_input(&track_input)
                             .map_err(|e| e.to_string())?;
+                        if let Some(cid) = crate_id {
+                            state
+                                .store
+                                .link_input_to_crate(cid, track_input.id)
+                                .map_err(|e| e.to_string())?;
+                        }
                         let mut job = state
                             .store
-                            .create_job(track_input.id, Some("ytdlp"), format_str)
+                            .create_job(track_input.id, Some("ytdlp"), format)
                             .map_err(|e| e.to_string())?;
                         // Pre-fill metadata from playlist resolution
                         job.title = entry.title.clone();
@@ -72,9 +130,15 @@ pub async fn ingest_inputs(
                 _ => {
                     // Single track or expansion failed — normal flow
                     state.store.insert_input(input).map_err(|e| e.to_string())?;
+                    if let Some(cid) = crate_id {
+                        state
+                            .store
+                            .link_input_to_crate(cid, input.id)
+                            .map_err(|e| e.to_string())?;
+                    }
                     let job = state
                         .store
-                        .create_job(input.id, input.provider_id.as_deref(), format_str)
+                        .create_job(input.id, input.provider_id.as_deref(), format)
                         .map_err(|e| e.to_string())?;
                     jobs::spawn(app.clone(), job.id);
                     jobs.push(job);
@@ -83,6 +147,12 @@ pub async fn ingest_inputs(
         } else {
             // Local path, query, or non-ytdlp URL — normal flow
             state.store.insert_input(input).map_err(|e| e.to_string())?;
+            if let Some(cid) = crate_id {
+                state
+                    .store
+                    .link_input_to_crate(cid, input.id)
+                    .map_err(|e| e.to_string())?;
+            }
             let provider_id = input.provider_id.clone().or({
                 if input.kind == InputKind::LocalPath {
                     Some("local_file".to_string())
@@ -92,7 +162,7 @@ pub async fn ingest_inputs(
             });
             let job = state
                 .store
-                .create_job(input.id, provider_id.as_deref(), format_str)
+                .create_job(input.id, provider_id.as_deref(), format)
                 .map_err(|e| e.to_string())?;
             jobs::spawn(app.clone(), job.id);
             jobs.push(job);
@@ -646,6 +716,25 @@ pub async fn write_text_file(path: String, content: String) -> CmdResult<()> {
     tokio::fs::write(&path, content)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Read a plain-text playlist file (one song string per line) into the
+/// ingest box, exactly as if the user had pasted its contents — lets them
+/// drop/pick a `.txt` generated by another tool and queue the whole list
+/// in one go. Blank lines are dropped; the frontend decides what to do
+/// with the returned text.
+#[tauri::command]
+pub async fn read_playlist_file(path: String) -> CmdResult<String> {
+    let content = tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|e| format!("Couldn't read {}: {}", path, e))?;
+    let lines = content
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(lines)
 }
 
 /// Same as `write_text_file` but for binary output (e.g. a Serato `.crate`

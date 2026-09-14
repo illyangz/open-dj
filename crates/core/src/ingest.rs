@@ -54,21 +54,57 @@ pub fn guess_provider(raw: &str, kind: InputKind) -> Option<String> {
     Some("ytdlp".to_string())
 }
 
+/// When the "download extended versions" option is on, rewrite a free-text
+/// search query toward the extended/dj-mix version of a track (YouTube
+/// search is the resolution path, so this biases the query rather than
+/// picking a specific upload). Queries that already mention "extended" are
+/// left untouched; trailing Radio Edit/Edit markers are rewritten to
+/// "Extended Mix"; anything else gets " extended mix" appended.
+fn apply_extended(query: &str) -> String {
+    let lower = query.to_ascii_lowercase();
+    if lower.contains("extended") {
+        return query.to_string();
+    }
+    for marker in [
+        "- radio edit",
+        "- radio mix",
+        "radio edit",
+        "radio mix",
+        "- edit",
+    ] {
+        if lower.ends_with(marker) {
+            let stem = query[..query.len() - marker.len()].trim_end();
+            return format!("{stem} - Extended Mix");
+        }
+    }
+    format!("{query} extended mix")
+}
+
 /// FR-003/FR-004: turn multiline pasted text into normalized, immutable
 /// input records. Callers are responsible for surfacing a confirmation
 /// summary when `inputs.len() > 25` (FR-004) — kept out of this pure
 /// function so it stays trivially unit-testable.
-pub fn parse_inputs(text: &str, provenance: &str) -> Vec<InputRecord> {
+///
+/// `extended` selects "download the extended version": URLs and local
+/// paths are never rewritten, but plain search queries are biased toward
+/// extended mixes by `apply_extended`.
+pub fn parse_inputs(text: &str, provenance: &str, extended: bool) -> Vec<InputRecord> {
     text.lines()
         .map(|l| l.trim())
         .filter(|l| !l.is_empty())
         .map(|line| {
             let kind = classify_line(line);
+            let raw_value = if extended && kind == InputKind::Query {
+                apply_extended(line)
+            } else {
+                line.to_string()
+            };
+            let provider_id = guess_provider(&raw_value, kind);
             InputRecord {
                 id: Uuid::new_v4(),
-                raw_value: line.to_string(),
+                raw_value,
                 kind,
-                provider_id: guess_provider(line, kind),
+                provider_id,
                 created_at: Utc::now(),
                 provenance: provenance.to_string(),
                 parse_status: if kind == InputKind::Unsupported {
@@ -112,7 +148,7 @@ mod tests {
     #[test]
     fn parse_inputs_skips_blank_lines_and_tags_provider() {
         let text = "https://soundcloud.com/artist/track\n\nDaft Punk - One More Time\n";
-        let inputs = parse_inputs(text, "paste");
+        let inputs = parse_inputs(text, "paste", false);
         assert_eq!(inputs.len(), 2);
         assert_eq!(inputs[0].provider_id.as_deref(), Some("ytdlp"));
         assert_eq!(inputs[1].kind, InputKind::Query);
@@ -124,7 +160,53 @@ mod tests {
             .map(|i| format!("track {i}"))
             .collect::<Vec<_>>()
             .join("\n");
-        let inputs = parse_inputs(&many, "paste");
+        let inputs = parse_inputs(&many, "paste", false);
         assert_eq!(inputs.len(), 30); // FR-004 confirmation UI is a caller concern
+    }
+
+    #[test]
+    fn extended_rewrites_queries_not_urls() {
+        let text = "Daft Punk - One More Time\nhttps://example.com/track.mp3\n/tmp/some.wav";
+        let inputs = parse_inputs(text, "paste", true);
+        assert_eq!(
+            inputs[0].raw_value,
+            "Daft Punk - One More Time extended mix"
+        );
+        assert_eq!(inputs[1].raw_value, "https://example.com/track.mp3");
+        assert_eq!(inputs[2].raw_value, "/tmp/some.wav");
+    }
+
+    #[test]
+    fn extended_rewrites_radio_edit_to_extended_mix() {
+        let inputs = parse_inputs("Sentin - Find Us - Radio Edit", "paste", true);
+        assert_eq!(inputs[0].raw_value, "Sentin - Find Us - Extended Mix");
+    }
+
+    #[test]
+    fn extended_rewrites_trailing_edit_marker() {
+        let inputs = parse_inputs(
+            "Ankhoï - THE FUTURE - Notre Dame Remix - Edit",
+            "paste",
+            true,
+        );
+        assert_eq!(
+            inputs[0].raw_value,
+            "Ankhoï - THE FUTURE - Notre Dame Remix - Extended Mix"
+        );
+    }
+
+    #[test]
+    fn extended_leaves_existing_extended_alone() {
+        let inputs = parse_inputs("Franc Fala - Looney Tunes - Extended Mix", "paste", true);
+        assert_eq!(
+            inputs[0].raw_value,
+            "Franc Fala - Looney Tunes - Extended Mix"
+        );
+    }
+
+    #[test]
+    fn normal_parse_is_untouched_when_extended_off() {
+        let inputs = parse_inputs("Sentin - Find Us - Radio Edit", "paste", false);
+        assert_eq!(inputs[0].raw_value, "Sentin - Find Us - Radio Edit");
     }
 }

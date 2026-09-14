@@ -115,6 +115,17 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             PRIMARY KEY (crate_id, track_path)
         );
         CREATE INDEX IF NOT EXISTS idx_crate_tracks_crate_id ON crate_tracks(crate_id);
+
+        -- "Save this playlist as a crate" linkage: when a playlist is
+        -- ingested as a crate, each input that resolves to a downloaded
+        -- file is recorded here so the queued job's destination can be
+        -- auto-populated into the crate the moment the download finishes.
+        CREATE TABLE IF NOT EXISTS crate_inputs (
+            crate_id        TEXT NOT NULL REFERENCES crates(id),
+            input_id        TEXT NOT NULL REFERENCES inputs(id),
+            PRIMARY KEY (crate_id, input_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_crate_inputs_input_id ON crate_inputs(input_id);
         "#,
     )
 }

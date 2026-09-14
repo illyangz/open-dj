@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "../store/useAppStore";
+import { api } from "../lib/api";
 import { DOWNLOAD_FORMATS, type DownloadFormat } from "../types";
 import { DropIcon } from "./icons";
 
@@ -18,11 +19,15 @@ export function IngestDial() {
   const [text, setText] = useState("");
   const [dragging, setDragging] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [saveAsCrate, setSaveAsCrate] = useState(false);
+  const [crateName, setCrateName] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const ingest = useAppStore((s) => s.ingest);
   const setWorkspace = useAppStore((s) => s.setWorkspace);
   const selectedFormat = useAppStore((s) => s.selectedFormat);
   const setSelectedFormat = useAppStore((s) => s.setSelectedFormat);
+  const extendedVersions = useAppStore((s) => s.extendedVersions);
+  const setExtendedVersions = useAppStore((s) => s.setExtendedVersions);
 
   useEffect(() => {
     const unlisten = getCurrentWebview().onDragDropEvent((event) => {
@@ -31,7 +36,7 @@ export function IngestDial() {
       } else if (event.payload.type === "drop") {
         setDragging(false);
         const paths = event.payload.paths;
-        if (paths.length > 0) void submit(paths.join("\n"));
+        if (paths.length > 0) void handleDrop(paths);
       } else {
         setDragging(false);
       }
@@ -47,10 +52,55 @@ export function IngestDial() {
     if (!trimmed) return;
     setSubmitting(true);
     try {
-      await ingest(trimmed);
+      await ingest(trimmed, saveAsCrate ? crateName : undefined);
       setText("");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  function nameFromPath(path: string): string {
+    return path.split(/[\\/]/).pop()?.replace(/\.txt$/i, "") ?? "";
+  }
+
+  async function handleDrop(paths: string[]) {
+    const txtPaths = paths.filter((p) => p.toLowerCase().endsWith(".txt"));
+    const otherPaths = paths.filter((p) => !p.toLowerCase().endsWith(".txt"));
+    if (txtPaths.length > 0) {
+      const parts = await Promise.all(
+        txtPaths.map(async (p) => {
+          try {
+            return (await api.readPlaylistFile(p)).trim();
+          } catch {
+            return "";
+          }
+        }),
+      );
+      const loaded = parts.filter(Boolean).join("\n");
+      if (loaded) {
+        setText((prev) => (prev ? `${prev}\n${loaded}` : loaded));
+        setSaveAsCrate(true);
+        setCrateName((prev) => prev || nameFromPath(txtPaths[0]));
+      }
+    }
+    if (otherPaths.length > 0) void submit(otherPaths.join("\n"));
+  }
+
+  async function handleLoadPlaylist() {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: "Playlist (.txt)", extensions: ["txt"] }],
+    });
+    if (typeof selected !== "string") return;
+    try {
+      const content = await api.readPlaylistFile(selected);
+      if (content.trim()) {
+        setText((prev) => (prev ? `${prev}\n${content.trim()}` : content.trim()));
+        setSaveAsCrate(true);
+        setCrateName(nameFromPath(selected));
+      }
+    } catch (e: unknown) {
+      console.error("Failed to load playlist:", e);
     }
   }
 
@@ -85,7 +135,7 @@ export function IngestDial() {
         <div>
           <h2 className="font-display font-semibold text-xl">Drop a track. Keep control.</h2>
           <p className="text-sm text-parchment-dim mt-1 max-w-md">
-            Paste links or search text below, or drop audio files anywhere in this window.
+            Paste links or search text below, or drop .txt playlists and audio files anywhere in this window.
           </p>
         </div>
 
@@ -99,7 +149,7 @@ export function IngestDial() {
               void submit(text);
             }
           }}
-          placeholder="YouTube, Spotify, SoundCloud, Beatport... paste links (one per line)"
+          placeholder="YouTube, Spotify, SoundCloud... paste links or song names (one per line)"
           rows={3}
           className="w-full max-w-xl resize-none rounded-xl bg-charcoal-900/70 border border-charcoal-700 focus:border-signal/70 focus:outline-none px-4 py-3 text-sm font-mono placeholder:text-parchment-dim/50"
         />
@@ -110,22 +160,61 @@ export function IngestDial() {
           </p>
         )}
 
-        <div className="flex items-center gap-2">
-          <label className="text-[11px] text-parchment-dim">Format:</label>
-          <select
-            value={selectedFormat}
-            onChange={(e) => setSelectedFormat(e.target.value as DownloadFormat)}
-            className="bg-charcoal-900 border border-charcoal-700 rounded-md px-2 py-1 text-xs text-parchment focus:outline-none focus:border-teal/60"
-          >
-            {DOWNLOAD_FORMATS.map((f) => (
-              <option key={f.value} value={f.value}>
-                {f.label}
-              </option>
-            ))}
-          </select>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] text-parchment-dim">Format:</label>
+            <select
+              value={selectedFormat}
+              onChange={(e) => setSelectedFormat(e.target.value as DownloadFormat)}
+              className="bg-charcoal-900 border border-charcoal-700 rounded-md px-2 py-1 text-xs text-parchment focus:outline-none focus:border-teal/60"
+            >
+              {DOWNLOAD_FORMATS.map((f) => (
+                <option key={f.value} value={f.value}>
+                  {f.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <label className="flex items-center gap-1.5 text-[11px] text-parchment-dim cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={extendedVersions}
+              onChange={(e) => setExtendedVersions(e.target.checked)}
+              className="accent-teal"
+            />
+            Extended versions
+          </label>
         </div>
 
         <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-[11px] text-parchment-dim cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={saveAsCrate}
+              onChange={(e) => setSaveAsCrate(e.target.checked)}
+              className="accent-teal"
+            />
+            Save as crate
+          </label>
+          <input
+            value={crateName}
+            onChange={(e) => setCrateName(e.target.value)}
+            disabled={!saveAsCrate}
+            placeholder="Crate name"
+            className="bg-charcoal-900 border border-charcoal-700 rounded-md px-2 py-1 text-xs text-parchment focus:outline-none focus:border-teal/60 disabled:opacity-40 placeholder:text-parchment-dim/50 w-44"
+          />
+          <span className="text-[10px] text-parchment-dim/70">
+            each finished download is added to the crate
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleLoadPlaylist}
+            className="px-3 py-1.5 rounded-full text-xs font-medium border border-charcoal-700 text-parchment-dim hover:text-parchment hover:border-teal/60 transition-colors"
+          >
+            Load .txt
+          </button>
           <button
             onClick={() => textareaRef.current?.focus()}
             className="px-3 py-1.5 rounded-full text-xs font-medium border border-charcoal-700 text-parchment-dim hover:text-parchment hover:border-teal/60 transition-colors"
