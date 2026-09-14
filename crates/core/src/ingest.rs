@@ -40,18 +40,25 @@ fn looks_like_local_path(s: &str) -> bool {
     has_drive_letter || s.starts_with("./") || s.starts_with("../") || s.starts_with('/')
 }
 
-/// Best-effort provider guess used only for display before a provider
-/// adapter has actually resolved the input. The provider registry is the
-/// source of truth for capability and policy.
+/// Best-effort provider guess used to tag inputs (and the jobs created
+/// from them) before a provider adapter has actually resolved the input.
+/// The provider registry is the source of truth for capability and policy;
+/// this only decides which adapter gets first shot at the input.
+///
+/// URLs and free-text search queries both go to yt-dlp (universal adapter):
+/// it extracts publicly available audio streams from streaming platforms
+/// and searches YouTube for plain-text queries. Local files use the file
+/// provider, and anything unsupported stays untagged so the registry's
+/// `detect_for` fallback can evaluate it later.
 pub fn guess_provider(raw: &str, kind: InputKind) -> Option<String> {
-    if kind != InputKind::Url {
-        return None;
+    match kind {
+        InputKind::Url | InputKind::Query => Some("ytdlp".to_string()),
+        InputKind::LocalPath => {
+            let _ = raw;
+            None
+        }
+        InputKind::Unsupported => None,
     }
-    let lower = raw.to_ascii_lowercase();
-    // All streaming platform URLs are handled by yt-dlp (universal adapter).
-    // No API keys required — yt-dlp extracts publicly available audio streams.
-    let _ = &lower; // suppress unused variable warning
-    Some("ytdlp".to_string())
 }
 
 /// When the "download extended versions" option is on, rewrite a free-text
@@ -152,6 +159,9 @@ mod tests {
         assert_eq!(inputs.len(), 2);
         assert_eq!(inputs[0].provider_id.as_deref(), Some("ytdlp"));
         assert_eq!(inputs[1].kind, InputKind::Query);
+        // Plain-text queries must be tagged so jobs resolve them via the
+        // yt-dlp YouTube search path instead of failing with "no provider".
+        assert_eq!(inputs[1].provider_id.as_deref(), Some("ytdlp"));
     }
 
     #[test]

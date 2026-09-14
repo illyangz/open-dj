@@ -912,6 +912,14 @@ impl ProviderAdapter for YtdlpAdapter {
     }
 
     async fn resolve_metadata(&self, raw: &str) -> Result<Vec<TrackCandidate>> {
+        // Plain free-text query (a song name, not a URL): search YouTube and
+        // pick the top hit. Movies/explicit "Support the artist" headers and
+        // other uploads that don't sound like the track are avoided by
+        // relying on yt-dlp ranking; the fetched audio is the matched video.
+        if !raw.starts_with("http://") && !raw.starts_with("https://") {
+            return self.search_youtube(raw, raw, None).await;
+        }
+
         // SoundCloud: use direct API (no yt-dlp needed)
         if Self::is_soundcloud_url(raw) {
             let client_id = self.detect_sc_client_id().await?;
