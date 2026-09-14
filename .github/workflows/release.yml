@@ -283,27 +283,33 @@ jobs:
         if: matrix.platform == 'macos-latest'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
         run: |
           set -euxo pipefail
-          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern "*${{ github.ref_name }}*.dmg" --output OpenDJ-macOS.dmg --clobber
-          gh release upload "${{ github.ref_name }}" OpenDJ-macOS.dmg --clobber --repo "${{ github.repository }}"
+          PATTERN="${TAG#v}"
+          gh release download "$TAG" --repo "${{ github.repository }}" --pattern "*${PATTERN}*.dmg" --output OpenDJ-macOS.dmg --clobber
+          gh release upload "$TAG" OpenDJ-macOS.dmg --clobber --repo "${{ github.repository }}"
 
       - name: Upload stable-named download link (Windows)
         if: matrix.platform == 'windows-latest'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
         shell: pwsh
         run: |
-          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern "*${{ github.ref_name }}*.exe" --output OpenDJ-Windows.exe --clobber
+          $pattern = "$env:TAG".TrimStart('v')
+          gh release download "$env:TAG" --repo "${{ github.repository }}" --pattern "*$pattern*.exe" --output OpenDJ-Windows.exe --clobber
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          gh release upload "${{ github.ref_name }}" OpenDJ-Windows.exe --clobber --repo "${{ github.repository }}"
+          gh release upload "$env:TAG" OpenDJ-Windows.exe --clobber --repo "${{ github.repository }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload stable-named download link (Linux)
         if: matrix.platform == 'ubuntu-latest'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
         run: |
           set -euxo pipefail
-          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern "*${{ github.ref_name }}*.AppImage" --output OpenDJ-Linux.AppImage --clobber
-          gh release upload "${{ github.ref_name }}" OpenDJ-Linux.AppImage --clobber --repo "${{ github.repository }}"
+          PATTERN="${TAG#v}"
+          gh release download "$TAG" --repo "${{ github.repository }}" --pattern "*${PATTERN}*.AppImage" --output OpenDJ-Linux.AppImage --clobber
+          gh release upload "$TAG" OpenDJ-Linux.AppImage --clobber --repo "${{ github.repository }}"
