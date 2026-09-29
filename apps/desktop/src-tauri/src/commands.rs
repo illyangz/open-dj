@@ -200,6 +200,14 @@ pub async fn retry_job(app: AppHandle, state: State<'_, AppState>, id: Uuid) -> 
     Ok(job)
 }
 
+/// Download a "needs review" job's suggested match as-is.
+#[tauri::command]
+pub async fn approve_match(app: AppHandle, state: State<'_, AppState>, id: Uuid) -> CmdResult<Job> {
+    let job = state.store.approve_match(id).map_err(|e| e.to_string())?;
+    jobs::spawn(app, id);
+    Ok(job)
+}
+
 #[tauri::command]
 pub async fn delete_job(state: State<'_, AppState>, id: Uuid) -> CmdResult<()> {
     state.store.delete_job(id).map_err(|e| e.to_string())

@@ -1,5 +1,8 @@
-use crate::yt_dlp_bin;
-use crate::{Capabilities, PolicyStatus, ProviderAdapter, ProviderError, Result, TrackCandidate};
+use crate::{matching, yt_dlp_bin};
+use crate::{
+    Capabilities, MatchedUpload, PolicyStatus, ProviderAdapter, ProviderError, Result,
+    TrackCandidate, TrackHint,
+};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -487,6 +490,7 @@ impl YtdlpAdapter {
             source_url,
             confidence: 1.0,
             downloadable: transcode_url.is_some(),
+            matched_upload: None,
         }])
     }
 
@@ -603,17 +607,35 @@ impl YtdlpAdapter {
     /// and artist from Spotify's own public track-embed page first (no
     /// login/API key needed, same no-key-scraping approach already used
     /// for SoundCloud), then use *that* to build an accurate search query.
-    async fn resolve_drm_url(&self, raw: &str) -> Result<Vec<TrackCandidate>> {
+    ///
+    /// A pasted playlist fans out into dozens of these lookups at once and
+    /// Spotify throttles the burst, so the embed fetch is retried and, if it
+    /// still fails, `hint` (the title/artist the playlist listing already
+    /// gave us) is used instead. Never fall back to searching the opaque
+    /// ID — that is what used to download random songs.
+    async fn resolve_drm_url(
+        &self,
+        raw: &str,
+        hint: Option<&TrackHint>,
+    ) -> Result<Vec<TrackCandidate>> {
         if Self::is_spotify_url(raw) {
-            if let Some(track_id) = Self::extract_spotify_track_id(raw) {
-                if let Ok(meta) = self.fetch_spotify_track_metadata(&track_id).await {
-                    let query = match &meta.artist {
-                        Some(artist) => format!("{} {}", meta.title, artist),
-                        None => meta.title.clone(),
-                    };
-                    return self.search_youtube(raw, &query, Some(meta)).await;
-                }
-            }
+            let track_id = Self::extract_spotify_track_id(raw).ok_or(ProviderError::NoMatch)?;
+            let meta = match self.fetch_spotify_track_metadata_retrying(&track_id).await {
+                Ok(meta) => meta,
+                Err(e) => match hint {
+                    Some(h) => SourceTrackMeta {
+                        title: h.title.clone(),
+                        artist: h.artist.clone(),
+                        duration_ms: None,
+                    },
+                    None => {
+                        return Err(ProviderError::NoConfidentMatch(format!(
+                            "Couldn't read this track's title from Spotify ({e}) — retry the job in a minute."
+                        )))
+                    }
+                },
+            };
+            return self.search_youtube(raw, meta).await;
         }
 
         // Try yt-dlp directly first (covers platforms it can extract without a search, e.g. some Apple Music/Deezer pages).
@@ -626,49 +648,195 @@ impl YtdlpAdapter {
             }
         }
 
-        // Last resort: a heuristic search query guessed from the URL slug.
+        if let Some(h) = hint {
+            return self
+                .search_youtube(
+                    raw,
+                    SourceTrackMeta {
+                        title: h.title.clone(),
+                        artist: h.artist.clone(),
+                        duration_ms: None,
+                    },
+                )
+                .await;
+        }
+
+        // Last resort: a search query guessed from the URL slug (Apple
+        // Music URLs carry the song name; opaque IDs are rejected).
         let search_query = Self::extract_search_query(raw);
         if search_query.is_empty() {
             return Err(ProviderError::NoMatch);
         }
-        self.search_youtube(raw, &search_query, None).await
+        self.search_free_text(raw, &search_query).await
     }
 
-    /// Run a YouTube search for `query` and build a candidate from the top
-    /// result. When `known` metadata was resolved directly from the source
-    /// platform, it overrides whatever (often messy) title/uploader the
-    /// matched YouTube video itself reports — YouTube is only the audio
+    /// Free-text search ("Artist - Title" or just a song name): scored the
+    /// same way, but the matched upload's own title/uploader become the
+    /// track metadata since we have nothing better.
+    async fn search_free_text(&self, raw: &str, query: &str) -> Result<Vec<TrackCandidate>> {
+        let target = matching::target_from_query(query);
+        let (info, platform, score) = self.best_upload(query, &target).await?;
+        Ok(vec![Self::searched_candidate(raw, info, platform, score)])
+    }
+
+    /// Search for a track whose real metadata came from the source
+    /// platform. That metadata overrides whatever (often messy) title/
+    /// uploader the matched video reports — YouTube is only the audio
     /// source here, not the source of truth for track metadata.
     async fn search_youtube(
         &self,
         raw: &str,
-        query: &str,
-        known: Option<SourceTrackMeta>,
+        meta: SourceTrackMeta,
     ) -> Result<Vec<TrackCandidate>> {
-        let search_url = format!("ytsearch1:{query}");
-        let json = self
-            .run_ytdlp_json(&["--dump-json", "--no-download", "--no-playlist", &search_url])
-            .await?;
+        let query = match &meta.artist {
+            Some(artist) => format!("{} - {}", matching::primary_artist(artist), meta.title),
+            None => meta.title.clone(),
+        };
+        let target = matching::Target {
+            title: meta.title.clone(),
+            artist: meta.artist.clone(),
+            duration_ms: meta.duration_ms,
+        };
+        let (info, platform, score) = self.best_upload(&query, &target).await?;
 
-        let info: YtdlpInfo = serde_json::from_str(&json).map_err(|e| {
-            ProviderError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Failed to parse yt-dlp output: {e}"),
-            ))
-        })?;
-
-        let mut candidate = info.into_candidate(raw, true);
-        if let Some(meta) = known {
-            candidate.title = meta.title;
-            candidate.artist = meta.artist.map(|a| format!("{a} (via YouTube)"));
-            if meta.duration_ms.is_some() {
-                candidate.duration_ms = meta.duration_ms;
-            }
-            candidate.confidence = 0.85;
+        let via = if platform == "soundcloud" {
+            "SoundCloud"
         } else {
-            candidate.confidence = 0.7;
+            "YouTube"
+        };
+        let mut candidate = Self::searched_candidate(raw, info, platform, score);
+        candidate.title = meta.title;
+        candidate.artist = meta.artist.map(|a| format!("{a} (via {via})"));
+        if meta.duration_ms.is_some() {
+            candidate.duration_ms = meta.duration_ms;
         }
         Ok(vec![candidate])
+    }
+
+    /// Search YouTube and SoundCloud for `query` (flat — one fast request
+    /// each, no per-result page loads), score every result against
+    /// `target`, and return the best downloadable one, or
+    /// `NoConfidentMatch` if nothing is close enough. SoundCloud often has
+    /// DJ-relevant uploads YouTube lacks; its 30-second previews score low
+    /// on duration and are double-checked as non-snipped before use.
+    async fn best_upload(
+        &self,
+        query: &str,
+        target: &matching::Target,
+    ) -> Result<(YtdlpInfo, &'static str, f32)> {
+        let yt_url = format!("ytsearch10:{query}");
+        let sc_url = format!("scsearch10:{query}");
+        let yt_args = [
+            "--dump-json",
+            "--no-download",
+            "--flat-playlist",
+            yt_url.as_str(),
+        ];
+        let sc_args = [
+            "--dump-json",
+            "--no-download",
+            "--flat-playlist",
+            sc_url.as_str(),
+        ];
+        let (yt, sc) = tokio::join!(self.run_ytdlp_json(&yt_args), self.run_ytdlp_json(&sc_args));
+        let parse = |json: &str| -> Vec<YtdlpInfo> {
+            json.lines()
+                .filter(|l| !l.trim().is_empty())
+                .filter_map(|l| serde_json::from_str(l).ok())
+                .collect()
+        };
+        // A SoundCloud outage shouldn't sink a search YouTube can answer.
+        let yt_infos = match yt {
+            Ok(json) => parse(&json),
+            Err(e) => match &sc {
+                Ok(_) => Vec::new(),
+                Err(_) => return Err(e),
+            },
+        };
+        let sc_infos = sc.map(|json| parse(&json)).unwrap_or_default();
+
+        // YouTube first so ties go to it (stable sort below).
+        let mut scored: Vec<(YtdlpInfo, &'static str, f32)> = yt_infos
+            .into_iter()
+            .map(|i| (i, "youtube"))
+            .chain(sc_infos.into_iter().map(|i| (i, "soundcloud")))
+            .map(|(info, platform)| {
+                let hit = matching::Hit {
+                    title: info.title.clone().unwrap_or_default(),
+                    channel: info.channel.clone().or_else(|| info.uploader.clone()),
+                    duration_ms: info.duration.map(|d| (d * 1000.0) as u64),
+                };
+                let score = matching::score(target, &hit);
+                (info, platform, score)
+            })
+            .collect();
+        let checked = scored.len();
+        scored.sort_by(|a, b| b.2.total_cmp(&a.2));
+
+        for (info, platform, score) in scored {
+            if score < matching::MIN_SCORE {
+                break;
+            }
+            if platform == "soundcloud" && !self.soundcloud_is_full_track(&info).await {
+                continue;
+            }
+            return Ok((info, platform, score));
+        }
+        Err(ProviderError::NoConfidentMatch(format!(
+            "Couldn't find an accurate file for \"{query}\" (checked {checked} YouTube/SoundCloud results) — skipped rather than download the wrong song."
+        )))
+    }
+
+    /// True if a SoundCloud search hit is a full, downloadable stream
+    /// rather than a Go+ 30-second preview.
+    async fn soundcloud_is_full_track(&self, info: &YtdlpInfo) -> bool {
+        let Some(url) = info.webpage_url.as_deref() else {
+            return false;
+        };
+        let Ok(client_id) = self.detect_sc_client_id().await else {
+            return false;
+        };
+        matches!(
+            self.resolve_soundcloud(url, &client_id).await.as_deref(),
+            Ok([c, ..]) if c.downloadable
+        )
+    }
+
+    /// Candidate for a search match, recording the upload itself so an
+    /// uncertain match can be shown for review.
+    fn searched_candidate(
+        raw: &str,
+        info: YtdlpInfo,
+        platform: &'static str,
+        score: f32,
+    ) -> TrackCandidate {
+        let upload = MatchedUpload {
+            platform: platform.to_string(),
+            title: info.title.clone().unwrap_or_default(),
+            uploader: info.channel.clone().or_else(|| info.uploader.clone()),
+            duration_ms: info.duration.map(|d| (d * 1000.0) as u64),
+        };
+        let mut candidate = info.into_candidate(raw, true);
+        candidate.confidence = score.min(1.0);
+        candidate.matched_upload = Some(upload);
+        candidate
+    }
+
+    async fn fetch_spotify_track_metadata_retrying(
+        &self,
+        track_id: &str,
+    ) -> Result<SourceTrackMeta> {
+        let mut last_err = None;
+        for delay_ms in [0u64, 800, 2500] {
+            if delay_ms > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+            }
+            match self.fetch_spotify_track_metadata(track_id).await {
+                Ok(meta) => return Ok(meta),
+                Err(e) => last_err = Some(e),
+            }
+        }
+        Err(last_err.expect("at least one attempt"))
     }
 
     /// Extract the track ID from `open.spotify.com/track/<id>` or
@@ -742,7 +910,9 @@ impl YtdlpAdapter {
                 if track_part.contains('-') && track_part.len() > 10 {
                     return track_part.replace('-', " ");
                 }
-                return format!("spotify track {track_part}");
+                // An opaque track ID says nothing about the song —
+                // searching it returns random videos.
+                return String::new();
             }
         }
 
@@ -833,6 +1003,8 @@ struct YtdlpInfo {
     title: Option<String>,
     artist: Option<String>,
     uploader: Option<String>,
+    channel: Option<String>,
+    url: Option<String>,
     album: Option<String>,
     playlist_title: Option<String>,
     duration: Option<f64>,
@@ -855,7 +1027,11 @@ impl YtdlpInfo {
         let album = self.album.or(self.playlist_title);
         let duration_ms = self.duration.map(|d| (d * 1000.0) as u64);
         let id = self.id.unwrap_or_else(|| source_url.to_string());
-        let source = self.webpage_url.unwrap_or_else(|| source_url.to_string());
+        // Flat search results may carry only `url`.
+        let source = self
+            .webpage_url
+            .or(self.url)
+            .unwrap_or_else(|| source_url.to_string());
 
         TrackCandidate {
             id,
@@ -867,6 +1043,7 @@ impl YtdlpInfo {
             source_url: source,
             confidence: 1.0,
             downloadable: true,
+            matched_upload: None,
         }
     }
 }
@@ -911,13 +1088,23 @@ impl ProviderAdapter for YtdlpAdapter {
         self.cookies.write().unwrap().file = file;
     }
 
+    async fn resolve_metadata_hinted(
+        &self,
+        raw: &str,
+        hint: Option<&TrackHint>,
+    ) -> Result<Vec<TrackCandidate>> {
+        if hint.is_some() && Self::is_drm_platform(raw) {
+            return self.resolve_drm_url(raw, hint).await;
+        }
+        self.resolve_metadata(raw).await
+    }
+
     async fn resolve_metadata(&self, raw: &str) -> Result<Vec<TrackCandidate>> {
         // Plain free-text query (a song name, not a URL): search YouTube and
-        // pick the top hit. Movies/explicit "Support the artist" headers and
-        // other uploads that don't sound like the track are avoided by
-        // relying on yt-dlp ranking; the fetched audio is the matched video.
+        // take the best-scoring hit (see `matching`) — covers, sped-up
+        // edits and unrelated videos are rejected rather than downloaded.
         if !raw.starts_with("http://") && !raw.starts_with("https://") {
-            return self.search_youtube(raw, raw, None).await;
+            return self.search_free_text(raw, raw).await;
         }
 
         // SoundCloud: use direct API (no yt-dlp needed)
@@ -928,7 +1115,7 @@ impl ProviderAdapter for YtdlpAdapter {
 
         // DRM platforms: YouTube search fallback
         if Self::is_drm_platform(raw) {
-            return self.resolve_drm_url(raw).await;
+            return self.resolve_drm_url(raw, None).await;
         }
 
         // Everything else: yt-dlp
@@ -1004,6 +1191,7 @@ impl ProviderAdapter for YtdlpAdapter {
             _ => "320K",
         };
         let audio_fmt = format;
+        let mut downloaded: Option<PathBuf> = None;
         for (i, client) in clients.iter().enumerate() {
             // web_embedded is the only client that reliably serves a real
             // audio-only format (140/m4a) without a PO token; the others
@@ -1032,6 +1220,11 @@ impl ProviderAdapter for YtdlpAdapter {
                 &output_str,
                 "--no-playlist",
                 "--no-overwrites",
+                // Report the exact final file so concurrent downloads into
+                // the same folder can't pick up each other's output.
+                "--print",
+                "after_move:filepath",
+                "--no-simulate",
                 "--parse-metadata",
                 "%(title)s:%(meta_title)s",
                 "--parse-metadata",
@@ -1128,6 +1321,13 @@ impl ProviderAdapter for YtdlpAdapter {
             let output = output.expect("at least one attempt always runs");
 
             if output.status.success() {
+                downloaded = String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .rev()
+                    .map(str::trim)
+                    .find(|l| !l.is_empty())
+                    .map(PathBuf::from)
+                    .filter(|p| p.exists());
                 attempt_errors.clear();
                 break;
             }
@@ -1166,8 +1366,12 @@ impl ProviderAdapter for YtdlpAdapter {
             }
         }
 
-        // Find the downloaded file
-        find_latest_download(dest_dir, audio_fmt)
+        // Prefer the path yt-dlp printed; scanning for the newest file is
+        // only a fallback for yt-dlp builds that print nothing.
+        match downloaded {
+            Some(path) => Ok(path),
+            None => find_latest_download(dest_dir, audio_fmt),
+        }
     }
 
     async fn search(&self, query: &str) -> Result<Vec<TrackCandidate>> {
@@ -1353,12 +1557,50 @@ mod tests {
         ));
     }
 
+    #[tokio::test]
+    #[ignore = "network: hits Spotify, YouTube and SoundCloud"]
+    async fn live_matching_smoke() {
+        let p = YtdlpAdapter::new();
+        for raw in [
+            "https://open.spotify.com/track/3n3Ppam7vgaVa1iaRUc9Lp",
+            "Daft Punk - One More Time",
+            "fred again.. - Delilah (pull me out of this)",
+            "asdkjh qwpoeiru zmxncb",
+        ] {
+            match p.resolve_metadata(raw).await {
+                Ok(c) => eprintln!(
+                    "{raw}\n  -> {:.2} {:?} {}\n",
+                    c[0].confidence,
+                    c[0].matched_upload
+                        .as_ref()
+                        .map(|u| (&u.platform, &u.title, &u.uploader)),
+                    c[0].source_url
+                ),
+                Err(e) => eprintln!("{raw}\n  -> ERR {e}\n"),
+            }
+        }
+        let hinted = p
+            .resolve_drm_url(
+                "https://open.spotify.com/track/0000000000000000000000",
+                Some(&TrackHint {
+                    title: "Mr. Brightside".into(),
+                    artist: Some("The Killers".into()),
+                }),
+            )
+            .await;
+        eprintln!(
+            "hint fallback -> {:?}",
+            hinted.map(|c| (c[0].confidence, c[0].source_url.clone()))
+        );
+    }
+
     #[test]
-    fn extract_search_query_from_spotify() {
+    fn opaque_spotify_id_is_never_searched() {
+        // Searching "spotify track <id>" returns random videos.
         let q = YtdlpAdapter::extract_search_query(
             "https://open.spotify.com/track/3n3Ppam7vgaVa1iaRUc9Lp",
         );
-        assert!(!q.is_empty());
+        assert!(q.is_empty());
     }
 
     #[test]
