@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api, onStemModelDownloadProgress, onStemSplitProgress } from "../lib/api";
 import { useTrackAnalysis } from "../lib/useTrackAnalysis";
@@ -40,6 +40,7 @@ const COLLISION_LABEL: Record<PlannedMove["collision"], string> = {
 export function LibraryWorkspace() {
   const jobs = useAppStore((s) => s.jobs);
   const zoomPercent = useAppStore((s) => s.zoomPercent);
+  const removeFromLibrary = useAppStore((s) => s.removeFromLibrary);
   const downloads = useMemo(() => {
     // Dedupe by destination — multiple Job rows can point at the same file
     // (e.g. repeated SoundCloud downloads). Keep the most recently updated.
@@ -207,7 +208,7 @@ export function LibraryWorkspace() {
                 crates={crates}
                 onAddToCrate={(crateId) => job.destination && void api.addTrackToCrate(crateId, job.destination)}
                 onCreateCrateAndAdd={(name) => job.destination && void createCrateAndAdd(name, job.destination)}
-                onRemove={() => job.destination && void api.removeFromLibrary(job.destination)}
+                onRemove={() => job.destination && void removeFromLibrary(job.destination)}
               />
             ))}
           </ul>
@@ -1065,10 +1066,15 @@ function DownloadRow({
             Reveal in Finder
           </button>
           <button
-            onClick={() => {
-              if (confirm(`Remove "${job.title ?? "this track"}" from library? The file will be deleted.`)) {
-                onRemove();
-              }
+            onClick={async () => {
+              // window.confirm is a silent no-op in the macOS webview, which
+              // made Remove do nothing — use the native dialog instead.
+              const ok = await ask(`Remove "${job.title ?? "this track"}" from library? The file will be deleted.`, {
+                title: "Remove track",
+                kind: "warning",
+                okLabel: "Remove",
+              });
+              if (ok) onRemove();
             }}
             className="px-3 py-1.5 rounded-full text-xs font-medium border border-danger/40 text-danger/80 hover:bg-danger/10 transition-colors"
           >
