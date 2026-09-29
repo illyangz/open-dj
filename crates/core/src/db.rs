@@ -127,5 +127,28 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_crate_inputs_input_id ON crate_inputs(input_id);
         "#,
-    )
+    )?;
+    add_column_if_missing(conn, "jobs", "suggested_match", "TEXT")
+}
+
+/// `CREATE TABLE IF NOT EXISTS` never alters an existing table, so columns
+/// added after a table first shipped are backfilled here.
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    decl: &str,
+) -> rusqlite::Result<()> {
+    let exists = conn
+        .prepare(&format!(
+            "SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1"
+        ))?
+        .exists([column])?;
+    if !exists {
+        conn.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"),
+            [],
+        )?;
+    }
+    Ok(())
 }

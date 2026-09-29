@@ -1,5 +1,6 @@
 use crate::state::AppState;
-use opendj_core::{InputKind, JobState};
+use opendj_core::{InputKind, JobState, SuggestedMatch};
+use opendj_providers::{matching, ProviderError, TrackCandidate, TrackHint};
 use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
@@ -75,14 +76,84 @@ async fn run(app: &AppHandle, state: &AppState, job_id: Uuid) -> Result<(), Stri
         return Ok(());
     };
 
-    let candidates = provider
-        .resolve_metadata(&input.raw_value)
-        .await
-        .map_err(|e| e.to_string())?;
-    let candidate = candidates
-        .into_iter()
-        .next()
-        .ok_or("No match found for this input")?;
+    let candidate = if let Some(approved) = job.suggested_match.clone() {
+        // The user approved a "needs review" match: download exactly that
+        // upload rather than searching again (results can shift).
+        TrackCandidate {
+            id: approved.source_url.clone(),
+            title: job.title.clone().unwrap_or(approved.upload_title),
+            artist: job.artist.clone(),
+            album: None,
+            duration_ms: approved.duration_ms,
+            provider: provider.id().to_string(),
+            source_url: approved.source_url,
+            confidence: 1.0,
+            downloadable: true,
+            matched_upload: None,
+        }
+    } else {
+        // Playlist expansion pre-fills title/artist from the collection
+        // listing; pass them along so a throttled per-track Spotify lookup
+        // can still search by the real song name. On a retry these come
+        // from the previous resolution, which tags the artist "(via …)".
+        let hint = job.title.clone().map(|title| TrackHint {
+            title,
+            artist: job.artist.as_deref().map(|a| {
+                a.trim_end_matches(" (via YouTube)")
+                    .trim_end_matches(" (via SoundCloud)")
+                    .to_string()
+            }),
+        });
+        let resolved = provider
+            .resolve_metadata_hinted(&input.raw_value, hint.as_ref())
+            .await;
+        let candidates = match resolved {
+            Ok(c) => c,
+            Err(ProviderError::NoConfidentMatch(msg)) => {
+                state
+                    .store
+                    .fail_job(job_id, "no_accurate_match", &msg)
+                    .map_err(|e| e.to_string())?;
+                return Ok(());
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        candidates
+            .into_iter()
+            .next()
+            .ok_or("No match found for this input")?
+    };
+
+    // Found by search but not certain: hold for the user instead of
+    // downloading something that may be the wrong song.
+    if let Some(upload) = candidate
+        .matched_upload
+        .clone()
+        .filter(|_| candidate.confidence < matching::AUTO_ACCEPT)
+    {
+        let mut job = state.store.get_job(job_id).map_err(|e| e.to_string())?;
+        job.title = Some(candidate.title.clone());
+        job.artist = candidate.artist.clone();
+        job.provider_id = Some(provider.id().to_string());
+        job.state = JobState::AwaitingConfirmation;
+        job.progress = 1.0;
+        job.error_class = Some("needs_review".to_string());
+        job.error_message = Some(format!(
+            "Not sure this is the right file ({}% match). Check it, then approve to download or search again.",
+            (candidate.confidence * 100.0).round()
+        ));
+        job.suggested_match = Some(SuggestedMatch {
+            source_url: candidate.source_url.clone(),
+            platform: upload.platform,
+            upload_title: upload.title,
+            uploader: upload.uploader,
+            duration_ms: upload.duration_ms,
+            score: candidate.confidence,
+        });
+        job.updated_at = chrono::Utc::now();
+        state.store.save_job(&job).map_err(|e| e.to_string())?;
+        return Ok(());
+    }
 
     let mut job = state.store.get_job(job_id).map_err(|e| e.to_string())?;
     job.title = Some(candidate.title.clone());
@@ -129,6 +200,7 @@ async fn run(app: &AppHandle, state: &AppState, job_id: Uuid) -> Result<(), Stri
 
     let mut job = state.store.get_job(job_id).map_err(|e| e.to_string())?;
     job.destination = Some(path.to_string_lossy().to_string());
+    job.suggested_match = None;
     job.state = JobState::Complete;
     job.progress = 1.0;
     state.store.save_job(&job).map_err(|e| e.to_string())?;

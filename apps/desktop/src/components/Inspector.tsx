@@ -1,5 +1,8 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useAppStore } from "../store/useAppStore";
 import { api } from "../lib/api";
+import { formatTime } from "../lib/format";
+import type { SuggestedMatch } from "../types";
 import { JobStateBadge } from "./JobStateBadge";
 
 /** FR-011/FR-012: per-item state, provider, format, progress, destination,
@@ -42,7 +45,16 @@ export function Inspector() {
         <Row label="Provider" value={job.provider_id ?? "—"} />
         <Row label="Destination" value={job.destination ?? "—"} mono />
         <Row label="Progress" value={`${Math.round(job.progress * 100)}%`} />
-        {job.error_class && <Row label="Error" value={`${job.error_class}: ${job.error_message ?? ""}`} danger />}
+        {job.error_class === "needs_review" ? (
+          <Row label="Needs review" value={job.error_message ?? ""} />
+        ) : job.error_class === "no_accurate_match" ? (
+          <Row label="No accurate file found" value={job.error_message ?? ""} danger />
+        ) : (
+          job.error_class && <Row label="Error" value={`${job.error_class}: ${job.error_message ?? ""}`} danger />
+        )}
+        {job.state === "awaiting_confirmation" && job.suggested_match && (
+          <SuggestedMatchCard match={job.suggested_match} />
+        )}
         <Row label="Created" value={new Date(job.created_at).toLocaleString()} />
       </dl>
 
@@ -56,6 +68,12 @@ export function Inspector() {
         {canCancel(job.state) && (
           <ActionButton label="Cancel" onClick={() => run(() => api.cancelJob(job.id))} />
         )}
+        {job.state === "awaiting_confirmation" && job.suggested_match && (
+          <>
+            <ActionButton label="Approve & download" primary onClick={() => run(() => api.approveMatch(job.id))} />
+            <ActionButton label="Search again" onClick={() => run(() => api.retryJob(job.id))} />
+          </>
+        )}
         {(job.state === "failed" || job.state === "cancelled") && (
           <ActionButton label="Retry" primary onClick={() => run(() => api.retryJob(job.id))} />
         )}
@@ -68,6 +86,31 @@ export function Inspector() {
         />
       </div>
     </aside>
+  );
+}
+
+/** The upload search wasn't sure about — enough to judge it at a glance,
+ * plus a link to listen before approving. */
+function SuggestedMatchCard({ match }: { match: SuggestedMatch }) {
+  const platform = match.platform === "soundcloud" ? "SoundCloud" : "YouTube";
+  return (
+    <div className="rounded-lg border border-signal/40 p-3 space-y-1">
+      <div className="text-[11px] uppercase tracking-wide text-parchment-dim/70">
+        Suggested match · {Math.round(match.score * 100)}%
+      </div>
+      <div className="text-sm break-words">{match.upload_title}</div>
+      <div className="text-xs text-parchment-dim">
+        {[match.uploader, platform, match.duration_ms != null ? formatTime(match.duration_ms / 1000) : null]
+          .filter(Boolean)
+          .join(" · ")}
+      </div>
+      <button
+        onClick={() => void openUrl(match.source_url)}
+        className="text-xs text-teal hover:underline"
+      >
+        Open on {platform} ↗
+      </button>
+    </div>
   );
 }
 

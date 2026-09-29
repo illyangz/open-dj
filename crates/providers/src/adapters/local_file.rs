@@ -53,6 +53,7 @@ impl ProviderAdapter for LocalFileProvider {
             source_url: raw.to_string(),
             confidence: 1.0,
             downloadable: false,
+            matched_upload: None,
         }])
     }
 }

@@ -76,6 +76,7 @@ impl Store {
             error_message: None,
             created_at: now,
             updated_at: now,
+            suggested_match: None,
         };
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -107,7 +108,8 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, input_id, candidate_id, state, progress, title, artist, provider_id,
-                    requested_format, destination, error_class, error_message, created_at, updated_at
+                    requested_format, destination, error_class, error_message, created_at, updated_at,
+                    suggested_match
              FROM jobs ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map([], row_to_job)?;
@@ -137,7 +139,8 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, input_id, candidate_id, state, progress, title, artist, provider_id,
-                    requested_format, destination, error_class, error_message, created_at, updated_at
+                    requested_format, destination, error_class, error_message, created_at, updated_at,
+                    suggested_match
              FROM jobs WHERE id = ?1",
         )?;
         stmt.query_row(params![id.to_string()], row_to_job)
@@ -192,6 +195,26 @@ impl Store {
         // Clear the previous failure — carrying it forward made a job that
         // succeeded on retry still show its old error in the inspector,
         // which read as "it worked but didn't really" even though it did.
+        job.error_class = None;
+        job.error_message = None;
+        // A rejected "needs review" match must not be downloaded on retry.
+        job.suggested_match = None;
+        job.updated_at = Utc::now();
+        self.save_job(&job)?;
+        Ok(job)
+    }
+
+    /// Accept a job's `suggested_match`: back to `Waiting`, and the runner
+    /// downloads that exact upload instead of searching again.
+    pub fn approve_match(&self, id: Uuid) -> Result<Job> {
+        let mut job = self.get_job(id)?;
+        if job.state != JobState::AwaitingConfirmation || job.suggested_match.is_none() {
+            return Err(CoreError::InvalidTransition(
+                job.state.as_str().to_string(),
+                "approve",
+            ));
+        }
+        job.state = JobState::Waiting;
         job.error_class = None;
         job.error_message = None;
         job.updated_at = Utc::now();
@@ -330,7 +353,7 @@ impl Store {
         conn.execute(
             "UPDATE jobs SET candidate_id=?2, state=?3, progress=?4, title=?5, artist=?6,
                 provider_id=?7, requested_format=?8, destination=?9, error_class=?10,
-                error_message=?11, updated_at=?12 WHERE id=?1",
+                error_message=?11, updated_at=?12, suggested_match=?13 WHERE id=?1",
             params![
                 job.id.to_string(),
                 job.candidate_id.map(|u| u.to_string()),
@@ -344,6 +367,9 @@ impl Store {
                 job.error_class,
                 job.error_message,
                 job.updated_at.to_rfc3339(),
+                job.suggested_match
+                    .as_ref()
+                    .map(|m| serde_json::to_string(m).expect("SuggestedMatch serializes")),
             ],
         )?;
         Ok(())
@@ -684,6 +710,9 @@ fn row_to_job(row: &rusqlite::Row) -> rusqlite::Result<Job> {
         updated_at: chrono::DateTime::parse_from_rfc3339(&updated_at)
             .unwrap()
             .with_timezone(&Utc),
+        suggested_match: row
+            .get::<_, Option<String>>(14)?
+            .and_then(|json| serde_json::from_str(&json).ok()),
     })
 }
 
@@ -725,6 +754,7 @@ mod tests {
     use super::*;
     use crate::db;
     use crate::ingest::parse_inputs;
+    use crate::SuggestedMatch;
 
     fn store() -> Store {
         Store::new(db::open_in_memory().unwrap())
@@ -743,6 +773,44 @@ mod tests {
         let jobs = store.list_jobs().unwrap();
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].id, job.id);
+    }
+
+    #[test]
+    fn suggested_match_round_trips_and_approve_or_retry_resolve_it() {
+        let store = store();
+        let inputs = parse_inputs("Daft Punk - One More Time", "paste", false);
+        store.insert_input(&inputs[0]).unwrap();
+        let mut job = store.create_job(inputs[0].id, Some("ytdlp"), None).unwrap();
+
+        let suggestion = SuggestedMatch {
+            source_url: "https://www.youtube.com/watch?v=abc".into(),
+            platform: "youtube".into(),
+            upload_title: "One More Time (Lyrics)".into(),
+            uploader: Some("Someone".into()),
+            duration_ms: Some(282_000),
+            score: 0.7,
+        };
+        job.state = JobState::AwaitingConfirmation;
+        job.suggested_match = Some(suggestion.clone());
+        store.save_job(&job).unwrap();
+        assert_eq!(
+            store.get_job(job.id).unwrap().suggested_match,
+            Some(suggestion)
+        );
+
+        // Approve keeps the match so the runner downloads exactly it.
+        let approved = store.approve_match(job.id).unwrap();
+        assert_eq!(approved.state, JobState::Waiting);
+        assert!(approved.suggested_match.is_some());
+        assert!(store.approve_match(job.id).is_err());
+
+        // Retry ("search again") from review discards it.
+        let mut job = store.get_job(job.id).unwrap();
+        job.state = JobState::AwaitingConfirmation;
+        store.save_job(&job).unwrap();
+        let retried = store.retry_job(job.id).unwrap();
+        assert_eq!(retried.state, JobState::Waiting);
+        assert!(retried.suggested_match.is_none());
     }
 
     #[test]

@@ -31,6 +31,17 @@ export interface Job {
   error_message: string | null;
   created_at: string;
   updated_at: string;
+  /** Set while "needs review": the upload search found but wasn't sure of. */
+  suggested_match: SuggestedMatch | null;
+}
+
+export interface SuggestedMatch {
+  source_url: string;
+  platform: "youtube" | "soundcloud" | string;
+  upload_title: string;
+  uploader: string | null;
+  duration_ms: number | null;
+  score: number;
 }
 
 export interface Capabilities {

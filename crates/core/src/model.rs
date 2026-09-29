@@ -176,8 +176,13 @@ impl JobState {
         !matches!(self, JobState::Complete | JobState::Cancelled)
     }
 
+    /// Includes `AwaitingConfirmation` so a "needs review" match can be
+    /// rejected in favour of a fresh search.
     pub fn can_retry(&self) -> bool {
-        matches!(self, JobState::Failed | JobState::Cancelled)
+        matches!(
+            self,
+            JobState::Failed | JobState::Cancelled | JobState::AwaitingConfirmation
+        )
     }
 }
 
@@ -197,6 +202,27 @@ pub struct Job {
     pub error_message: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Set while a job is `AwaitingConfirmation` because search found only
+    /// a plausible — not certain — match. Approving the job downloads
+    /// exactly this upload; retrying discards it and searches again.
+    #[serde(default)]
+    pub suggested_match: Option<SuggestedMatch>,
+}
+
+/// An upload search found for a track but wasn't sure enough about to
+/// download unasked (see `Job::suggested_match`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SuggestedMatch {
+    pub source_url: String,
+    /// "youtube" or "soundcloud".
+    pub platform: String,
+    /// The upload's own title, e.g. "Song (Lyrics)" — what the user needs
+    /// to see to judge the match, as opposed to the job's clean title.
+    pub upload_title: String,
+    pub uploader: Option<String>,
+    pub duration_ms: Option<u64>,
+    /// 0–1 match score from the matcher.
+    pub score: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

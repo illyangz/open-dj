@@ -80,6 +80,7 @@ pub fn run() {
             commands::resume_job,
             commands::cancel_job,
             commands::retry_job,
+            commands::approve_match,
             commands::delete_job,
             commands::set_cue_point,
             commands::delete_cue_point,

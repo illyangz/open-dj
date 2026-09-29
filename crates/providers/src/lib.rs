@@ -1,4 +1,5 @@
 pub mod adapters;
+pub mod matching;
 pub mod playlist;
 mod registry;
 pub mod yt_dlp_bin;
@@ -43,6 +44,28 @@ pub struct TrackCandidate {
     /// requires adapters to check this per request, not just at
     /// registration time.
     pub downloadable: bool,
+    /// For candidates found by *searching* (DRM platforms, free-text
+    /// queries): the upload that was matched, so a less-than-certain match
+    /// can be shown for review. `None` when the input named the file
+    /// directly.
+    #[serde(default)]
+    pub matched_upload: Option<MatchedUpload>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MatchedUpload {
+    /// "youtube" or "soundcloud".
+    pub platform: String,
+    pub title: String,
+    pub uploader: Option<String>,
+    pub duration_ms: Option<u64>,
+}
+
+/// Track metadata known before resolution — see `resolve_metadata_hinted`.
+#[derive(Debug, Clone)]
+pub struct TrackHint {
+    pub title: String,
+    pub artist: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -57,6 +80,10 @@ pub enum ProviderError {
     NotConfigured(&'static str),
     #[error("no match found for input")]
     NoMatch,
+    /// Search ran but nothing looked enough like the track to download —
+    /// better to fail than to fetch an unrelated file.
+    #[error("{0}")]
+    NoConfidentMatch(String),
     #[error("{0}")]
     AuthRequired(String),
     #[error("track is not marked downloadable by the source")]
@@ -75,6 +102,19 @@ pub trait ProviderAdapter: Send + Sync {
     fn policy_status(&self) -> PolicyStatus;
     fn validate_input(&self, raw: &str) -> bool;
     async fn resolve_metadata(&self, raw: &str) -> Result<Vec<TrackCandidate>>;
+
+    /// Like `resolve_metadata`, with title/artist already known from
+    /// elsewhere (e.g. a Spotify playlist listing). Adapters that search by
+    /// metadata use it when the source can't be re-read; the default
+    /// ignores it.
+    async fn resolve_metadata_hinted(
+        &self,
+        raw: &str,
+        hint: Option<&TrackHint>,
+    ) -> Result<Vec<TrackCandidate>> {
+        let _ = hint;
+        self.resolve_metadata(raw).await
+    }
 
     /// Default: not supported. Adapters with a real, policy-permitted
     /// download path override this explicitly.

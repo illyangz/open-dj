@@ -94,6 +94,7 @@ impl ProviderAdapter for DirectUrlProvider {
             source_url: raw.to_string(),
             confidence: 0.6,
             downloadable: true,
+            matched_upload: None,
         }])
     }
 

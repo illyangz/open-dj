@@ -48,6 +48,7 @@ export const api = {
   resumeJob: (id: string) => invoke<Job>("resume_job", { id }),
   cancelJob: (id: string) => invoke<Job>("cancel_job", { id }),
   retryJob: (id: string) => invoke<Job>("retry_job", { id }),
+  approveMatch: (id: string) => invoke<Job>("approve_match", { id }),
   deleteJob: (id: string) => invoke<void>("delete_job", { id }),
 
   setCuePoint: (trackPath: string, slot: number, positionMs: number, label?: string, color?: string) =>
