@@ -80,6 +80,9 @@ interface AppStore {
   refreshJobs: () => Promise<void>;
   patchJob: (job: Job) => void;
   removeJobs: (ids: string[]) => Promise<void>;
+  /** Deletes a downloaded file and every job pointing at it, then drops
+   * those jobs locally so the Library list updates immediately. */
+  removeFromLibrary: (path: string) => Promise<void>;
   /** Creates jobs for `text` and merges them into `jobs` without switching
    * workspace — the shared primitive behind `ingest` (paste box, always
    * jumps to the Queue tab) and SoundCloud downloads (stay put, just show
@@ -178,6 +181,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set((state) => ({
       jobs: state.jobs.filter((j) => !idSet.has(j.id)),
       selectedJobId: idSet.has(state.selectedJobId ?? "") ? null : state.selectedJobId,
+    }));
+  },
+  removeFromLibrary: async (path: string) => {
+    await api.removeFromLibrary(path);
+    set((state) => ({
+      jobs: state.jobs.filter((j) => j.destination !== path),
+      selectedJobId: state.jobs.some((j) => j.id === state.selectedJobId && j.destination === path)
+        ? null
+        : state.selectedJobId,
     }));
   },
   enqueue: async (text: string, crateName?: string) => {
